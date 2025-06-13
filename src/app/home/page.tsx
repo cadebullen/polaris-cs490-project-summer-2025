@@ -38,12 +38,21 @@ export default function HomePage() {
             </Card>
             */} 
             {/* Upload Section */}
-            <div className="w-full max-w-md bg-gray-900/40 backdrop-blur-sm p-6 rounded-lg shadow-lg">
-                <h2 className="text-xl font-semibold text-white mb-4 text-center">Upload Your Resume</h2>
-                <FileUpload />
-            </div>
-            <div className="mt-10">
-                <BioSubmission />
+            <div className="min-h-screen flex flex-col items-center justify-start pt-16 px-6 bg-white dark:bg-black text-gray-900 dark:text-gray-100">
+                <h1 className="text-3xl font-bold mb-10 text-center">
+                    Welcome{user?.displayName
+                        ? `, ${user.displayName}`
+                        : user?.email
+                        ? `, ${user.email.split('@')[0]}`
+                        : "!"}
+                </h1>
+                <div className="w-full max-w-md bg-gray-900/40 backdrop-blur-sm p-6 rounded-lg shadow-lg">
+                    <h2 className="text-xl font-semibold text-white mb-4 text-center">Upload Your Resume</h2>
+                    <FileUpload />
+                </div>
+                <div className="mt-10">
+                    <BioSubmission />
+                </div>
             </div>
         </div>
     );
