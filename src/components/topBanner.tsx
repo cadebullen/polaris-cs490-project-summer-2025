@@ -13,6 +13,7 @@ import {
 import { useRouter, usePathname } from "next/navigation"; // Import usePathname
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import ThemeToggle from '@/components/ui/ThemeToggle';
 
 interface TopBannerProps {
     toggleSidePanel: () => void;
@@ -80,6 +81,11 @@ export default function TopBanner({ toggleSidePanel }: TopBannerProps) {
             {/* Center Section: Title */}
             <div className="flex-grow flex justify-center">
                 <h1 className="text-xl font-semibold">Marcus</h1>
+            </div>
+
+            {/* Theme Toggle Button */}
+            <div className="ml-auto">
+                <ThemeToggle />
             </div>
 
             {/* Right Section: Avatar with Dropdown */}
