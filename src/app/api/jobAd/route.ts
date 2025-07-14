@@ -47,30 +47,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing userId or jobText" }, { status: 400 });
     }
 
-    // Try to extract with regex for title and company, but always use Gemini for all fields
-    let title = jobText.match(/(?<=Title: ).*/i)?.[0];
-    let company = jobText.match(/(?<=Company: ).*/i)?.[0];
-
-    // Always use Gemini for all fields
-    let aiExtracted = await extractJobAdFieldsWithGemini(jobText);
+    // Only use Gemini for all fields
+    let { title, company, location, pay, overview, expectations } = await extractJobAdFieldsWithGemini(jobText);
     // Post-process pay/location if Gemini combined them
-    let location = aiExtracted.location;
-    let pay = aiExtracted.pay;
-    // If pay contains a colon and a dollar sign, split
     if (pay && pay.includes(":") && pay.match(/\$/)) {
       const idx = pay.lastIndexOf(":");
       if (idx !== -1) {
-        // If location is empty or matches the left part, update both
         const left = pay.slice(0, idx).trim();
         const right = pay.slice(idx + 1).trim();
         if (!location || location === pay) location = left;
         pay = right;
       }
     }
-    title ||= aiExtracted.title;
-    company ||= aiExtracted.company;
-    const overview = aiExtracted.overview;
-    const expectations = aiExtracted.expectations;
 
     const jobAd = {
       userId,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
 
 interface JobAd {
@@ -15,23 +15,6 @@ interface JobAd {
   submittedAt: string;
 }
 
-function parseCompany(ad: string): string {
-  const companyMatch = ad.match(/Company:\s*([\w\s&.,'-]+)/i) || ad.match(/at ([\w\s&.,'-]+)/i);
-  return companyMatch ? companyMatch[1].trim() : "Unknown";
-}
-
-function parseTitle(ad: string): string {
-  const titleMatch = ad.match(/Title:\s*([\w\s&.,'-]+)/i);
-  if (titleMatch) return titleMatch[1].trim();
-  const firstLine = ad.split("\n")[0];
-  return firstLine.length < 80 ? firstLine.trim() : "Unknown";
-}
-
-function parseLocation(ad: string): string {
-  const locMatch = ad.match(/Location:\s*([\w\s&.,'-]+)/i) || ad.match(/in ([\w\s&.,'-]+)/i);
-  return locMatch ? locMatch[1].trim() : "Unknown";
-}
-
 const JobAdSubmission: React.FC = () => {
   const [adText, setAdText] = useState("");
   const [ads, setAds] = useState<JobAd[]>([]);
@@ -40,6 +23,7 @@ const JobAdSubmission: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [resumeList, setResumeList] = useState<any[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<string | null>(null);
+  const [selectedJobAdId, setSelectedJobAdId] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [deleteAd, setDeleteAd] = useState<JobAd | null>(null);
@@ -47,6 +31,31 @@ const JobAdSubmission: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [jobUrl, setJobUrl] = useState("");
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+  const [generatingJobAdId, setGeneratingJobAdId] = useState<string | null>(null);
+  const [jobAdStatus, setJobAdStatus] = useState<{ [adId: string]: 'idle' | 'processing' | 'completed' }>({});
+  const [viewResume, setViewResume] = useState<any | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [templatePreview, setTemplatePreview] = useState<any | null>(null);
+  const [viewResumeUnformatted, setViewResumeUnformatted] = useState<string>("");
+  const [isLoadingUnformatted, setIsLoadingUnformatted] = useState(false);
+  const [unformattedError, setUnformattedError] = useState<string | null>(null);
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  // Add refs for auto-scroll
+  const step2Ref = useRef<HTMLDivElement | null>(null);
+  const step3Ref = useRef<HTMLDivElement | null>(null);
+
+  // Stepper state
+  const [currentStep, setCurrentStep] = useState(0);
+  const steps = [
+    { label: 'Submit Job Ad' },
+    { label: 'AI Resume Generation' },
+    { label: 'View AI Resume' },
+    { label: 'Format & Download' },
+  ];
 
   // Get Firebase user
   useEffect(() => {
@@ -98,60 +107,94 @@ const JobAdSubmission: React.FC = () => {
 
   const handleGenerateAIResume = async () => {
     if (!selectedResumeId) return alert("Please select a resume first.");
+    if (!selectedJobAdId) return alert("Please select a job ad.");
 
-    setIsGenerating(true); 
+    setIsGenerating(true);
+    setGeneratingJobAdId(selectedJobAdId); // Set the job ad being generated
+    setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'processing' }));
+    setSuccessMessage("Resume generation request received! Processing...");
+    if (toastRef.current) {
+      toastRef.current.style.display = "block";
+      setTimeout(() => {
+        if (toastRef.current) toastRef.current.style.display = "none";
+      }, 2000);
+    }
 
     try {
       const res = await fetch(`/api/saveResume?userId=${user.uid}&resumeId=${selectedResumeId}`);
       const data = await res.json();
       if (!data.resume) {
         setIsGenerating(false);
+        setGeneratingJobAdId(null);
+        setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'idle' }));
         return alert("Resume not found.");
       }
 
-      const jobText = localStorage.getItem("jobText") || "";
+      const selectedJobAd = ads.find(ad => ad.id === selectedJobAdId);
+      if (!selectedJobAd) {
+        setIsGenerating(false);
+        setGeneratingJobAdId(null);
+        setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'idle' }));
+        return alert("Selected job ad not found.");
+      }
+
+      const jobText = selectedJobAd.content;
       const editableResume = data.resume;
 
-      console.log("🔍 Generating AI Resume with:");
-      console.log("→ jobText:", jobText);
-      console.log("→ editableResume:", editableResume);
-
       if (!editableResume || !jobText) {
-        console.warn("⚠️ Missing required fields", { editableResume, jobText });
-      }
-
-      if (!jobText.trim()) {
         setIsGenerating(false);
-        return alert("Job description is missing. Please submit a job ad.");
+        setGeneratingJobAdId(null);
+        setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'idle' }));
+        return alert("Missing required fields.");
       }
 
-      const aiRes = await fetch("/api/generateResume", {
+      await fetch("/api/generateResume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobText, editableResume }),
+        body: JSON.stringify({ jobText, editableResume, jobAdId: selectedJobAdId, userId: user.uid }),
       });
 
-      const result = await aiRes.json();
-      console.log("AI Resume:", result);
+      // Start polling for completion
+      if (pollingRef.current) clearInterval(pollingRef.current);
+      pollingRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/generateResume?jobAdId=${selectedJobAdId}&userId=${user.uid}`);
+          const pollData = await pollRes.json();
+          if (pollData?.status === 'completed') {
+            setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'completed' }));
+            setIsGenerating(false);
+            setGeneratingJobAdId(null);
+            setSuccessMessage("AI resume generated successfully!");
+            if (pollingRef.current) clearInterval(pollingRef.current);
+          } else {
+            // Fallback: check if resume is available in /api/saveResume
+            const resumeRes = await fetch(`/api/saveResume?userId=${user.uid}&resumeId=${selectedResumeId}`);
+            const resumeData = await resumeRes.json();
+            if (resumeData?.resume) {
+              setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'completed' }));
+              setIsGenerating(false);
+              setGeneratingJobAdId(null);
+              setSuccessMessage("AI resume generated successfully!");
+              if (pollingRef.current) clearInterval(pollingRef.current);
+            }
+          }
+        } catch {}
+      }, 2000);
 
-      if (result?.resume) {
-        localStorage.setItem("aiResume", JSON.stringify(result.resume));
-        setIsGenerating(false);
-        setSuccessMessage(" AI resume generated successfully!");
-
-        setTimeout(() => {
-          window.location.href = "/"; // redirect after short delay
-        }, 1500);
-      }
-      else {
-        setIsGenerating(false);
-        alert("AI generation failed.");
-      }
     } catch (err) {
       setIsGenerating(false);
+      setGeneratingJobAdId(null);
+      setJobAdStatus(prev => ({ ...prev, [selectedJobAdId]: 'idle' }));
       alert("Error generating resume.");
     }
   };
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, []);
 
   // Load existing job ads from localStorage
   useEffect(() => {
@@ -220,6 +263,10 @@ const JobAdSubmission: React.FC = () => {
         }
         setMessage("Job ad submitted and parsed successfully!");
         setTimeout(() => setMessage(null), 2000);
+        // Auto-scroll to step 2
+        setTimeout(() => {
+          step2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 400);
       } else {
         setMessage("Failed to parse job ad.");
       }
@@ -235,195 +282,596 @@ const JobAdSubmission: React.FC = () => {
     setAds([]);
   };
 
+  // Fetch templates when AI Resume modal opens
+  useEffect(() => {
+    if (viewResume) {
+      setIsLoadingTemplates(true);
+      fetch("/api/templates")
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data.templates)) {
+            setTemplates(data.templates);
+          } else if (Array.isArray(data)) {
+            setTemplates(data);
+          } else {
+            setTemplates([]);
+          }
+          setIsLoadingTemplates(false);
+        })
+        .catch(() => {
+          setTemplates([]);
+          setIsLoadingTemplates(false);
+        });
+    }
+  }, [viewResume]);
+
+  // Auto-select most recent job ad and resume when available
+  useEffect(() => {
+    if (ads.length > 0 && !selectedJobAdId) {
+      setSelectedJobAdId(ads[0].id); // Most recent first (assuming sorted)
+    }
+  }, [ads, selectedJobAdId]);
+  useEffect(() => {
+    if (resumeList.length > 0 && !selectedResumeId) {
+      setSelectedResumeId(resumeList[0].resumeId);
+    }
+  }, [resumeList, selectedResumeId]);
+
+  // Stepper navigation handlers
+  const handleNext = () => {
+    if (currentStep < steps.length - 1) setCurrentStep(currentStep + 1);
+  };
+  const handleBack = () => {
+    if (currentStep > 0) setCurrentStep(currentStep - 1);
+  };
+
+  // Fetch unformatted resume automatically when viewResume changes in step 3
+  useEffect(() => {
+    if (currentStep === 2 && selectedJobAdId && user) {
+      setIsLoadingUnformatted(true);
+      setUnformattedError(null);
+      fetch(`/api/generateResume?jobAdId=${selectedJobAdId}&userId=${user.uid}&unformatted=true`)
+        .then(res => res.json())
+        .then(data => {
+          console.log("Unformatted resume fetch response:", data);
+          setViewResumeUnformatted(data.resume || "No unformatted resume available.");
+          setIsLoadingUnformatted(false);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch unformatted resume:", err);
+          setViewResumeUnformatted("");
+          setUnformattedError("Failed to fetch unformatted resume.");
+          setIsLoadingUnformatted(false);
+        });
+    } else {
+      setViewResumeUnformatted("");
+      setIsLoadingUnformatted(false);
+      setUnformattedError(null);
+    }
+  }, [currentStep, selectedJobAdId, user]);
+
   return (
     <>
       {/* Theme Toggle in top-right */}
       <div className="fixed top-4 right-4 z-50">
         <ThemeToggle />
       </div>
-      {/* Main Container with background gradient and card effect */}
-      <div className="min-h-screen flex flex-col items-center justify-start py-10 px-2 bg-gradient-to-br from-indigo-100 via-white to-blue-100 dark:from-gray-900 dark:via-gray-950 dark:to-gray-900 transition-colors duration-500">
-        <div className="w-full max-w-2xl bg-white/90 dark:bg-gray-900/90 rounded-2xl shadow-2xl p-6 border border-indigo-100 dark:border-gray-800 backdrop-blur-md">
-          <form onSubmit={handleSubmit} className="mb-8">
-            <label className="block mb-2 font-bold text-indigo-700 dark:text-indigo-300 text-lg">Paste or type a job ad:</label>
-            <textarea
-              className="w-full h-32 p-3 border-2 border-indigo-200 dark:border-gray-700 rounded-lg mb-3 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 transition"
-              value={adText}
-              onChange={e => setAdText(e.target.value)}
-              placeholder="Paste job ad here..."
-            />
-            <button
-              type="submit"
-              className="w-full py-3 bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500 text-white rounded-lg font-bold shadow hover:from-indigo-600 hover:to-blue-600 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition text-lg flex items-center justify-center gap-2"
-              disabled={isAdding}
-            >
-              {isAdding ? (
-                <span className="animate-spin mr-2">🔄</span>
-              ) : (
-                <span role="img" aria-label="submit">📤</span>
-              )}
-              {isAdding ? "Submitting..." : "Submit Job Ad"}
-            </button>
-            {message && (
-              <div className="mt-3 text-base font-medium text-green-600 dark:text-green-400 text-center">{message}</div>
-            )}
-          </form>
-
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xl font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
-              <span role="img" aria-label="list">📝</span> Submitted Job Ads
-            </h3>
-            {/* Removed Clear All button as requested */}
-          </div>
-
-          {ads.length === 0 ? (
-            <div className="text-gray-500 dark:text-gray-400 text-center py-8 border border-dashed border-gray-300 dark:border-gray-700 rounded-lg bg-white/60 dark:bg-gray-900/60">
-              No job ads submitted yet.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {ads.map(ad => (
-                <div key={ad.id} className="group p-5 bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 rounded-xl shadow-lg flex flex-col md:flex-row md:items-center md:justify-between border border-indigo-100 dark:border-gray-700 transition-all hover:scale-[1.02] hover:shadow-2xl">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-indigo-700 dark:text-indigo-300 text-lg mb-1 flex items-center gap-2">
-                      <span role="img" aria-label="briefcase">💼</span> {ad.title}
-                    </div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 mb-1">Company: <span className="font-medium">{ad.company}</span></div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 mb-1">Location: <span className="font-medium">{ad.location}</span></div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 mb-1">Pay: <span className="font-medium">{ad.pay}</span></div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 mb-1">Overview: <span className="font-medium">{typeof ad.overview === 'string' ? ad.overview.slice(0, 80) + (ad.overview.length > 80 ? '...' : '') : ''}</span></div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 mb-1">Expectations: <span className="font-medium">{typeof ad.expectations === 'string' ? ad.expectations.slice(0, 80) + (ad.expectations.length > 80 ? '...' : '') : ''}</span></div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Submitted: {new Date(ad.submittedAt).toLocaleString()}</div>
-                  </div>
-                  <div className="flex flex-col gap-2 mt-3 md:mt-0 md:ml-4">
-                    <button
-                      className="px-5 py-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500 text-white rounded-lg font-semibold shadow hover:from-indigo-600 hover:to-blue-600 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition group-hover:scale-105"
-                      onClick={() => setPreviewAd(ad)}
-                    >
-                      <span role="img" aria-label="preview">👁️</span> Preview
-                    </button>
-                    <button
-                      className="px-5 py-2 bg-red-600 text-white rounded-lg font-semibold shadow hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 transition group-hover:scale-105"
-                      onClick={() => setDeleteAd(ad)}
-                    >
-                      <span role="img" aria-label="delete">🗑️</span> Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Preview Modal */}
-          {previewAd && (
-            <div className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white dark:bg-gray-900 rounded-lg shadow-lg p-6 w-full max-w-2xl border border-gray-200 dark:border-gray-700 overflow-y-auto max-h-[80vh] relative mt-16 mb-4">
-                <button
-                  onClick={() => setPreviewAd(null)}
-                  className="absolute top-2 right-2 text-gray-600 dark:text-gray-300 hover:text-red-500 text-2xl font-bold"
-                  aria-label="Close preview"
-                >
-                  ×
-                </button>
-                <h4 className="text-lg font-semibold mb-2 text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
-                  <span role="img" aria-label="briefcase">💼</span> {previewAd.title}
-                </h4>
-                <div className="mb-2 text-sm text-gray-700 dark:text-gray-300">Company: {previewAd.company}</div>
-                <div className="mb-2 text-sm text-gray-700 dark:text-gray-300">Location: {previewAd.location}</div>
-                <div className="mb-2 text-sm text-gray-700 dark:text-gray-300">Pay: {previewAd.pay}</div>
-                <div className="mb-2 text-sm text-gray-700 dark:text-gray-300">Overview: {previewAd.overview}</div>
-                <div className="mb-2 text-sm text-gray-700 dark:text-gray-300">Expectations: {previewAd.expectations}</div>
-                <div className="mb-2 text-xs text-gray-500 dark:text-gray-400">Submitted: {new Date(previewAd.submittedAt).toLocaleString()}</div>
+      {/* Stepper/Progress Bar */}
+      <div className="w-full max-w-3xl mx-auto mt-6 mb-8 flex items-center justify-between gap-2">
+        {steps.map((step, idx) => (
+          <React.Fragment key={step.label}>
+            <div className="flex flex-col items-center flex-1">
+              <div className={`w-8 h-8 flex items-center justify-center rounded-full font-bold text-lg border-2 transition-all duration-300
+                ${idx < currentStep ? 'bg-green-500 border-green-500 text-white' : idx === currentStep ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-gray-200 border-gray-300 text-gray-400'}`}
+              >
+                {idx < currentStep ? <span>✓</span> : idx + 1}
               </div>
+              <span className={`mt-2 text-xs font-semibold text-center ${idx === currentStep ? 'text-indigo-700 dark:text-indigo-300' : idx < currentStep ? 'text-green-600' : 'text-gray-400'}`}>{step.label}</span>
             </div>
-          )}
-
-          {/* Delete Confirmation Modal */}
-          {deleteAd && (
-            <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-              <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-md w-full relative border border-red-200 dark:border-red-700">
-                <button
-                  onClick={() => setDeleteAd(null)}
-                  className="absolute top-2 right-2 text-gray-600 dark:text-gray-300 hover:text-red-500 text-2xl font-bold"
-                  aria-label="Close delete modal"
-                >
-                  ×
-                </button>
-                <h4 className="text-xl font-bold mb-4 text-red-700 dark:text-red-300 flex items-center gap-2">
-                  <span role="img" aria-label="delete">🗑️</span> Delete Job Ad
-                </h4>
-                <div className="mb-4 text-gray-700 dark:text-gray-300">
-                  Are you sure you want to delete the job ad for <span className="font-semibold">{deleteAd.title}</span> at <span className="font-semibold">{deleteAd.company}</span>?
-                </div>
-                <div className="flex justify-end gap-3">
+            {idx < steps.length - 1 && (
+              <div className={`flex-1 h-1 ${idx < currentStep ? 'bg-green-400' : 'bg-gray-300'} rounded transition-all duration-300`} />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+      {/* Main Container with enhanced background and layout */}
+      <div className="min-h-screen w-full flex flex-col items-center justify-start py-10 px-2 bg-gradient-to-br from-indigo-200 via-blue-100 to-purple-100 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950 transition-colors duration-500 relative">
+        {/* Decorative background shapes */}
+        <div className="absolute top-0 left-0 w-72 h-72 bg-indigo-300/20 dark:bg-indigo-900/20 rounded-full blur-3xl -z-10 animate-float" style={{left: '-6rem', top: '-6rem'}} />
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-purple-300/20 dark:bg-purple-900/20 rounded-full blur-3xl -z-10 animate-float2" style={{right: '-8rem', bottom: '-8rem'}} />
+        {/* Card container */}
+        <div className="w-full max-w-3xl bg-white/95 dark:bg-gray-900/95 rounded-3xl shadow-2xl p-8 border border-indigo-100 dark:border-gray-800 backdrop-blur-md flex flex-col gap-8">
+          {/* Step 1: Submit Job Ad & List */}
+          {currentStep === 0 && (
+            <>
+              <h2 className="text-xl font-bold mb-4 text-indigo-700 dark:text-indigo-300 flex items-center gap-2">1. Submit Job Ad</h2>
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4 mb-6">
+                <div className="flex flex-col md:flex-row md:items-end gap-4">
+                  <div className="flex-1">
+                    <label className="block mb-2 font-bold text-indigo-700 dark:text-indigo-300 text-lg">Paste link or type a job ad:</label>
+                    <textarea
+                      className="w-full h-32 p-3 border-2 border-indigo-200 dark:border-gray-700 rounded-xl dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 transition text-base shadow-sm"
+                      value={adText}
+                      onChange={e => setAdText(e.target.value)}
+                      placeholder="Paste job ad/link here..."
+                    />
+                  </div>
                   <button
-                    className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                    onClick={() => setDeleteAd(null)}
-                    disabled={isDeleting}
+                    type="submit"
+                    className="md:w-48 w-full py-3 bg-gradient-to-r from-indigo-500 via-purple-500 to-blue-500 text-white rounded-xl font-bold shadow-lg hover:from-indigo-600 hover:to-blue-600 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition text-lg flex items-center justify-center gap-2"
+                    disabled={isAdding}
                   >
-                    Cancel
+                    {isAdding ? (
+                      <span className="animate-spin mr-2">🔄</span>
+                    ) : (
+                      <span role="img" aria-label="submit">📤</span>
+                    )}
+                    {isAdding ? "Submitting..." : "Submit Job Ad"}
                   </button>
-                  <button
-                    className="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
-                    onClick={async () => {
-                      setIsDeleting(true);
-                      try {
-                        const res = await fetch(`/api/jobAd?id=${deleteAd.id}&userId=${user?.uid}`, {
-                          method: "DELETE",
-                        });
-                        if (res.ok) {
-                          setAds(ads.filter(a => a.id !== deleteAd.id));
-                          setDeleteAd(null);
-                        } else {
-                          alert("Failed to delete job ad.");
-                        }
-                      } catch (err) {
-                        alert("Error deleting job ad.");
+                </div>
+                {message && (
+                  <div className="mt-1 text-base font-medium text-green-600 dark:text-green-400 text-center">{message}</div>
+                )}
+              </form>
+              {/* Job Ads List as cards (with preview/delete) */}
+              <div className="space-y-4">
+                {ads.length === 0 ? (
+                  <div className="text-gray-500 dark:text-gray-400 text-center py-8 border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl bg-white/70 dark:bg-gray-900/70">
+                    No job ads submitted yet.
+                  </div>
+                ) : (
+                  <>
+                    {ads.map(ad => (
+                      <div key={ad.id} className="group p-6 bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 rounded-2xl shadow-lg flex flex-col md:flex-row md:items-center md:justify-between border border-indigo-100 dark:border-gray-700 transition-all hover:scale-[1.02] hover:shadow-2xl relative">
+                        {/* Job Ad Content Preview */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <h3 className="text-lg font-semibold text-indigo-700 dark:text-indigo-300 truncate max-w-xs" title={ad.title}>{ad.title}</h3>
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">@ {ad.company}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-3 mb-1 text-xs text-gray-500 dark:text-gray-400">
+                            <span title="Upload Date & Time">{new Date(ad.submittedAt).toLocaleString()}</span>
+                            <span title="Pay" className="font-semibold text-green-700 dark:text-green-300">{ad.pay}</span>
+                            <span title="Location">{ad.location}</span>
+                          </div>
+                          <div className="mb-2 text-sm text-gray-600 dark:text-gray-300 line-clamp-3" title={ad.overview}>{ad.overview || ad.content.slice(0, 180) + (ad.content.length > 180 ? '...' : '')}</div>
+                        </div>
+                        {/* Actions: Preview / Delete / Status */}
+                        <div className="flex flex-col md:flex-row md:items-center md:gap-4 mt-4 md:mt-0">
+                          <button
+                            onClick={() => {
+                              setPreviewAd(ad);
+                              setTimeout(() => {
+                                const pre = document.getElementById(`preview-content-${ad.id}`);
+                                if (pre) pre.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }, 100);
+                            }}
+                            className="flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white shadow-md hover:bg-indigo-700 transition-all"
+                            title="Preview Job Ad"
+                          >
+                            <span className="mr-2">👁️</span> Preview
+                          </button>
+                          <button
+                            onClick={() => {
+                              setDeleteAd(ad);
+                              setIsDeleting(true);
+                            }}
+                            className="flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg bg-red-600 text-white shadow-md hover:bg-red-700 transition-all"
+                            title="Delete Job Ad"
+                          >
+                            <span className="mr-2">🗑️</span> Delete
+                          </button>
+                          <span className={`text-xs mt-2 md:mt-0 ${jobAdStatus[ad.id] === 'completed' ? 'text-green-600' : 'text-gray-400'}`}>
+                            {jobAdStatus[ad.id] === 'completed' ? 'AI Resume Ready' : jobAdStatus[ad.id] === 'processing' ? 'Generating AI Resume...' : 'No AI Resume'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Global Preview Modal (not inside map) */}
+                    {previewAd && (
+                      <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/70 backdrop-blur-md">
+                        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 w-full max-w-2xl relative border border-indigo-200 dark:border-gray-700 overflow-y-auto max-h-[90vh] focus:outline-none" tabIndex={-1}>
+                          <button
+                            onClick={() => setPreviewAd(null)}
+                            className="absolute top-4 right-4 text-gray-600 dark:text-gray-300 hover:text-red-500 text-2xl font-bold"
+                            aria-label="Close preview"
+                          >×</button>
+                          <h3 className="text-lg font-bold mb-4 text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                            <span role="img" aria-label="preview">🔍</span> Job Ad Preview
+                          </h3>
+                          <div className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+                            <div className="font-semibold text-indigo-600 dark:text-indigo-400 mb-2">{previewAd.title}</div>
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              <span className="text-xs font-medium rounded-full bg-gray-200 dark:bg-gray-800 px-2 py-0.5">{previewAd.company}</span>
+                              <span className="text-xs font-medium rounded-full bg-gray-200 dark:bg-gray-800 px-2 py-0.5">{previewAd.location}</span>
+                              <span className="text-xs font-medium rounded-full bg-gray-200 dark:bg-gray-800 px-2 py-0.5">{previewAd.pay}</span>
+                            </div>
+                            <div className="whitespace-pre-wrap break-words max-h-60 overflow-y-auto border border-gray-100 dark:border-gray-800 rounded p-2 bg-gray-50 dark:bg-gray-800">{previewAd.content}</div>
+                          </div>
+                          {/* AI Resume section (if available) */}
+                          {jobAdStatus[previewAd.id] === 'completed' && downloadUrl && (
+                            <div className="mt-4 p-4 rounded-lg bg-green-50 dark:bg-green-900/50 border border-green-200 dark:border-green-700">
+                              <h4 className="font-semibold text-green-800 dark:text-green-200 mb-2">AI Resume Generated!</h4>
+                              <p className="text-sm text-green-700 dark:text-green-300 mb-2">
+                                Your AI-generated resume is ready. You can download it in the Format & Download step.
+                              </p>
+                              <a
+                                href={downloadUrl}
+                                className="inline-block px-4 py-2 text-sm font-semibold rounded-lg bg-green-600 text-white shadow-md hover:bg-green-700 transition-all"
+                                download
+                              >
+                                <span className="mr-2">⬇️</span> Download Resume
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
+          {/* Step 2: AI Resume Generation (select resume & job ad, generate) */}
+          {currentStep === 1 && (
+            <>
+              <h2 className="text-xl font-bold mb-4 text-indigo-700 dark:text-indigo-300 flex items-center gap-2">2. AI Resume Generation</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block mb-2 font-bold text-indigo-700 dark:text-indigo-300 text-lg">Choose a Resume:</label>
+                  <select
+                    className="w-full p-3 rounded-lg border-2 border-indigo-200 dark:border-gray-700 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 transition mb-2"
+                    value={selectedResumeId || ""}
+                    onChange={e => setSelectedResumeId(e.target.value)}
+                    disabled={resumeList.length === 0}
+                    title={resumeList.length === 0 ? 'No resumes available' : ''}
+                  >
+                    <option value="">Select a resume...</option>
+                    {resumeList.map((resume) => (
+                      <option key={resume.resumeId} value={resume.resumeId}>
+                        {resume.customName || resume.fileName || (resume.objective?.slice(0, 30)) || resume.resumeId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-2 font-bold text-indigo-700 dark:text-indigo-300 text-lg">Choose a Job Ad:</label>
+                  <select
+                    className="w-full p-3 rounded-lg border-2 border-indigo-200 dark:border-gray-700 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 transition mb-2"
+                    value={selectedJobAdId}
+                    onChange={e => setSelectedJobAdId(e.target.value)}
+                    disabled={ads.length === 0}
+                    title={ads.length === 0 ? 'No job ads available' : ''}
+                  >
+                    <option value="">Select a job ad...</option>
+                    {ads.map((ad) => (
+                      <option key={ad.id} value={ad.id}>
+                        {ad.title} {ad.company ? `@ ${ad.company}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={handleGenerateAIResume}
+                disabled={!selectedResumeId || !selectedJobAdId || isGenerating}
+                className={`w-full text-white font-bold py-3 px-4 rounded-xl text-lg bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 shadow focus:outline-none focus:ring-2 focus:ring-indigo-400 transition mt-4 ${(!selectedResumeId || !selectedJobAdId || isGenerating) ? "opacity-60 cursor-not-allowed" : ""}`}
+                title={!selectedResumeId ? 'Select a resume to continue' : !selectedJobAdId ? 'Select a job ad to continue' : ''}
+              >
+                {isGenerating ? (
+                  <span><span className="animate-spin inline-block mr-2">🔄</span> Processing...</span>
+                ) : (
+                  <span><span role="img" aria-label="robot">🤖</span> Generate Resume with AI</span>
+                )}
+              </button>
+              {successMessage && (
+                <div className="mt-3 text-green-600 font-medium text-base text-center">
+                  {successMessage}
+                </div>
+              )}
+            </>
+          )}
+          {/* Step 3: View AI Resume */}
+          {currentStep === 2 && (
+            <>
+              <h2 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-300 flex items-center gap-2">3. View AI Resume</h2>
+              {isLoadingUnformatted && (
+                <div className="mb-4 text-indigo-600 dark:text-indigo-300 flex items-center gap-2">
+                  <svg className="animate-spin h-5 w-5 mr-2 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
+                  Loading unformatted resume...
+                </div>
+              )}
+              {unformattedError && (
+                <div className="mb-4 text-red-600 dark:text-red-400">{unformattedError}</div>
+              )}
+              {viewResumeUnformatted && !isLoadingUnformatted && !unformattedError && (
+                <div className="mb-4">
+                  <div className="font-semibold text-indigo-700 dark:text-indigo-300 mb-1">Unformatted Resume</div>
+                  <pre className="text-xs md:text-sm whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto mb-4 border border-indigo-100 dark:border-indigo-700">
+                    {viewResumeUnformatted}
+                  </pre>
+                </div>
+              )}
+              <pre className="text-xs md:text-sm whitespace-pre-wrap break-words bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto mb-4">
+                {JSON.stringify(viewResume, null, 2)}
+              </pre>
+            </>
+          )}
+          {/* Step 4: Format & Download */}
+          {currentStep === 3 && viewResume && (
+            <>
+              <h2 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-300 flex items-center gap-2">4. Format & Download</h2>
+              {/* Template selection UI */}
+              <div className="mb-4">
+                <h5 className="font-semibold text-indigo-700 dark:text-indigo-300 mb-2">Choose a Resume Template:</h5>
+                {isLoadingTemplates ? (
+                  <div className="text-gray-500 dark:text-gray-400">Loading templates...</div>
+                ) : templates.length === 0 ? (
+                  <div className="text-gray-500 dark:text-gray-400">No templates available. Default will be used.</div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {templates.map((tpl: any) => (
+                      <div
+                        key={tpl.id || tpl.templateId}
+                        className={`relative border rounded-xl p-4 flex flex-col items-center cursor-pointer transition shadow-md hover:shadow-xl bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 ${selectedTemplateId === (tpl.id || tpl.templateId) ? 'border-indigo-500 ring-2 ring-indigo-400' : 'border-gray-200 dark:border-gray-700'}`}
+                        onClick={() => setSelectedTemplateId(tpl.id || tpl.templateId)}
+                        tabIndex={0}
+                        role="button"
+                        aria-pressed={selectedTemplateId === (tpl.id || tpl.templateId)}
+                      >
+                        {selectedTemplateId === (tpl.id || tpl.templateId) && (
+                          <span className="absolute top-2 right-2 text-green-600 dark:text-green-400 text-lg" title="Selected">✔️</span>
+                        )}
+                        {tpl.imageUrl ? (
+                          <img src={tpl.imageUrl} alt={tpl.name} className="w-28 h-28 object-contain mb-2 rounded shadow" />
+                        ) : (
+                          <div className="w-28 h-28 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-2 text-gray-400 text-4xl">📄</div>
+                        )}
+                        <div className="font-bold text-indigo-700 dark:text-indigo-300 text-base mb-1 text-center line-clamp-2 min-h-[2.5rem]">{tpl.name || 'Untitled Template'}</div>
+                        {tpl.description && (
+                          <div className="text-xs text-gray-600 dark:text-gray-400 text-center mb-1 line-clamp-3 min-h-[3rem]">{tpl.description}</div>
+                        )}
+                        <div className="text-xs text-gray-400 dark:text-gray-500 mb-2">{tpl.id || tpl.templateId}</div>
+                        <button
+                          className="mt-auto px-3 py-1 rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 text-xs font-semibold hover:bg-blue-200 dark:hover:bg-blue-700 transition"
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setTemplatePreview(tpl);
+                          }}
+                        >Preview</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                className="mt-2 px-5 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition shadow"
+                onClick={async () => {
+                  setDownloadUrl(null);
+                  try {
+                    const res = await fetch("/api/resumes/format", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        resume: viewResume,
+                        resumeId: selectedResumeId,
+                        templateId: selectedTemplateId || undefined, // fallback to default if not selected
+                        format: "pdf" // Explicitly request PDF output
+                      })
+                    });
+                    // Try to parse JSON for downloadUrl
+                    const contentType = res.headers.get('Content-Type') || '';
+                    if (contentType.includes('application/json')) {
+                      const data = await res.json();
+                      if (data.downloadUrl) {
+                        setDownloadUrl(data.downloadUrl);
+                        return;
+                      } else {
+                        alert("No download URL returned by server.");
+                        return;
                       }
-                      setIsDeleting(false);
-                    }}
-                    disabled={isDeleting}
-                  >
-                    {isDeleting ? "Deleting..." : "Delete"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Resume selection and AI generation */}
-        {!previewAd && (
-          <div className="mt-8 w-full max-w-2xl bg-white/90 dark:bg-gray-900/90 rounded-2xl shadow-xl p-6 border border-indigo-100 dark:border-gray-800 backdrop-blur-md z-[20] relative">
-            <label className="block mb-2 font-bold text-indigo-700 dark:text-indigo-300 text-lg">Choose a Resume:</label>
-            <select
-              className="w-full p-3 rounded-lg border-2 border-indigo-200 dark:border-gray-700 dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 transition mb-4"
-              value={selectedResumeId || ""}
-              onChange={e => setSelectedResumeId(e.target.value)}
-            >
-              <option value="">Select a resume...</option>
-              {resumeList.map((resume) => (
-                <option key={resume.resumeId} value={resume.resumeId}>
-                  {resume.customName || resume.objective?.slice(0, 30) || resume.resumeId}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={handleGenerateAIResume}
-              disabled={isGenerating}
-              className={`w-full text-white font-bold py-3 px-4 rounded-lg text-lg bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 shadow focus:outline-none focus:ring-2 focus:ring-indigo-400 transition ${isGenerating ? "opacity-60 cursor-not-allowed" : ""}`}
-            >
-              {isGenerating ? (
-                <span><span className="animate-spin inline-block mr-2">🔄</span> Processing...</span>
-              ) : (
-                <span><span role="img" aria-label="robot">🤖</span> Generate Resume with AI</span>
+                    }
+                    // Fallback: blob download
+                    if (!res.ok) throw new Error("Failed to format resume");
+                    const blob = await res.blob();
+                    let filename = "formatted_resume.pdf";
+                    const disposition = res.headers.get('Content-Disposition');
+                    if (disposition) {
+                      const match = disposition.match(/filename="?([^";]+)"?/);
+                      if (match) filename = match[1];
+                    }
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
+                      window.URL.revokeObjectURL(url);
+                      document.body.removeChild(a);
+                    }, 100);
+                  } catch (err) {
+                    alert("Failed to format and download resume.");
+                  }
+                }}
+              >Format Resume & Download</button>
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  className="mt-4 inline-block px-5 py-2 rounded bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow text-center"
+                  download
+                >
+                  Download Resume
+                </a>
               )}
-            </button>
-            {successMessage && (
-              <div className="mt-3 text-green-600 font-medium text-base text-center">
-                {successMessage}
+            </>
+          )}
+          {/* Stepper Navigation Buttons */}
+          <div className="flex justify-between mt-8">
+            <button
+              className="px-6 py-2 rounded bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+              onClick={handleBack}
+              disabled={currentStep === 0}
+            >Back</button>
+            <button
+              className="px-6 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition"
+              onClick={handleNext}
+              disabled={
+                (currentStep === 0 && ads.length === 0) ||
+                (currentStep === 1 && (!selectedResumeId || !selectedJobAdId || isGenerating || jobAdStatus[selectedJobAdId] !== 'completed')) ||
+                (currentStep === 2 && !viewResume) ||
+                currentStep === steps.length - 1
+              }
+            >Next</button>
+          </div>
+        </div>
+        {/* Toast notification for immediate feedback */}
+        <div ref={toastRef} style={{display: 'none'}} className="fixed top-8 left-1/2 transform -translate-x-1/2 z-[200] bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg font-semibold text-lg transition-all">
+          Resume generation request received! Processing...
+        </div>
+        {/* AI Resume Modal */}
+        {viewResume && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-2xl w-full relative border border-blue-200 dark:border-blue-700 overflow-y-auto max-h-[90vh]">
+              <button
+                onClick={() => setViewResume(null)}
+                className="absolute top-2 right-2 text-gray-600 dark:text-gray-300 hover:text-red-500 text-2xl font-bold"
+                aria-label="Close AI resume modal"
+              >×</button>
+              <h4 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                <span role="img" aria-label="robot">🤖</span> AI Generated Resume
+              </h4>
+              <pre className="text-xs md:text-sm whitespace-pre-wrap break-words bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto mb-4">
+                {JSON.stringify(viewResume, null, 2)}
+              </pre>
+              {/* Template selection UI */}
+              <div className="mb-4">
+                <h5 className="font-semibold text-indigo-700 dark:text-indigo-300 mb-2">Choose a Resume Template:</h5>
+                {isLoadingTemplates ? (
+                  <div className="text-gray-500 dark:text-gray-400">Loading templates...</div>
+                ) : templates.length === 0 ? (
+                  <div className="text-gray-500 dark:text-gray-400">No templates available. Default will be used.</div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {templates.map((tpl: any) => (
+                      <div
+                        key={tpl.id || tpl.templateId}
+                        className={`relative border rounded-xl p-4 flex flex-col items-center cursor-pointer transition shadow-md hover:shadow-xl bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 ${selectedTemplateId === (tpl.id || tpl.templateId) ? 'border-indigo-500 ring-2 ring-indigo-400' : 'border-gray-200 dark:border-gray-700'}`}
+                        onClick={() => setSelectedTemplateId(tpl.id || tpl.templateId)}
+                        tabIndex={0}
+                        role="button"
+                        aria-pressed={selectedTemplateId === (tpl.id || tpl.templateId)}
+                      >
+                        {selectedTemplateId === (tpl.id || tpl.templateId) && (
+                          <span className="absolute top-2 right-2 text-green-600 dark:text-green-400 text-lg" title="Selected">✔️</span>
+                        )}
+                        {tpl.imageUrl ? (
+                          <img src={tpl.imageUrl} alt={tpl.name} className="w-28 h-28 object-contain mb-2 rounded shadow" />
+                        ) : (
+                          <div className="w-28 h-28 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-2 text-gray-400 text-4xl">📄</div>
+                        )}
+                        <div className="font-bold text-indigo-700 dark:text-indigo-300 text-base mb-1 text-center line-clamp-2 min-h-[2.5rem]">{tpl.name || 'Untitled Template'}</div>
+                        {tpl.description && (
+                          <div className="text-xs text-gray-600 dark:text-gray-400 text-center mb-1 line-clamp-3 min-h-[3rem]">{tpl.description}</div>
+                        )}
+                        <div className="text-xs text-gray-400 dark:text-gray-500 mb-2">{tpl.id || tpl.templateId}</div>
+                        <button
+                          className="mt-auto px-3 py-1 rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 text-xs font-semibold hover:bg-blue-200 dark:hover:bg-blue-700 transition"
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setTemplatePreview(tpl);
+                          }}
+                        >Preview</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+              <button
+                className="mt-2 px-5 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition shadow"
+                onClick={async () => {
+                  setDownloadUrl(null);
+                  try {
+                    const res = await fetch("/api/resumes/format", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        resume: viewResume,
+                        resumeId: selectedResumeId,
+                        templateId: selectedTemplateId || undefined, // fallback to default if not selected
+                        format: "pdf" // Explicitly request PDF output
+                      })
+                    });
+                    // Try to parse JSON for downloadUrl
+                    const contentType = res.headers.get('Content-Type') || '';
+                    if (contentType.includes('application/json')) {
+                      const data = await res.json();
+                      if (data.downloadUrl) {
+                        setDownloadUrl(data.downloadUrl);
+                        return;
+                      } else {
+                        alert("No download URL returned by server.");
+                        return;
+                      }
+                    }
+                    // Fallback: blob download
+                    if (!res.ok) throw new Error("Failed to format resume");
+                    const blob = await res.blob();
+                    let filename = "formatted_resume.pdf";
+                    const disposition = res.headers.get('Content-Disposition');
+                    if (disposition) {
+                      const match = disposition.match(/filename="?([^";]+)"?/);
+                      if (match) filename = match[1];
+                    }
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
+                      window.URL.revokeObjectURL(url);
+                      document.body.removeChild(a);
+                    }, 100);
+                  } catch (err) {
+                    alert("Failed to format and download resume.");
+                  }
+                }}
+              >Format Resume & Download</button>
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  className="mt-4 inline-block px-5 py-2 rounded bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow text-center"
+                  download
+                >
+                  Download Resume
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Template Preview Modal */}
+        {templatePreview && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 max-w-lg w-full relative border border-blue-200 dark:border-blue-700 overflow-y-auto max-h-[90vh] animate-fade-in">
+              <button
+                onClick={() => setTemplatePreview(null)}
+                className="absolute top-2 right-2 text-gray-600 dark:text-gray-300 hover:text-red-500 text-2xl font-bold"
+                aria-label="Close template preview"
+              >×</button>
+              <h4 className="text-lg font-bold mb-2 text-blue-700 dark:text-blue-300 text-center">{templatePreview.name || 'Untitled Template'}</h4>
+              {templatePreview.imageUrl ? (
+                <img src={templatePreview.imageUrl} alt={templatePreview.name} className="w-48 h-48 object-contain mx-auto mb-4 rounded shadow" />
+              ) : (
+                <div className="w-48 h-48 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-4 text-gray-400 text-6xl mx-auto">📄</div>
+              )}
+              {templatePreview.description && (
+                <div className="text-sm text-gray-700 dark:text-gray-300 mb-2 text-center">{templatePreview.description}</div>
+              )}
+              <div className="text-xs text-gray-400 dark:text-gray-500 text-center mb-2">{templatePreview.id || templatePreview.templateId}</div>
+            </div>
           </div>
         )}
       </div>

@@ -3,15 +3,25 @@ import { NextRequest, NextResponse } from "next/server";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
+// Temporary in-memory status store (for demo; replace with DB or persistent store in production)
+const resumeStatus: { [key: string]: 'processing' | 'completed' } = {};
+// Store unformatted resume text for each user/jobAd
+const resumeRawText: { [key: string]: string } = {};
+
 export async function POST(req: NextRequest) {
   try {
-    const { jobText, editableResume } = await req.json();
+    const { jobText, editableResume, jobAdId, userId } = await req.json();
 
     if (!jobText || !editableResume) {
       return NextResponse.json({ error: "Missing input data" }, { status: 400 });
     }
 
-const prompt = `
+    // Mark as processing
+    if (jobAdId && userId) {
+      resumeStatus[`${userId}_${jobAdId}`] = 'processing';
+    }
+
+    const prompt = `
 You are an AI resume generator. Your task is to rewrite and enhance the resume below based on the given job description.
 
 You must return ONLY valid JSON in the following format:
@@ -21,8 +31,7 @@ You must return ONLY valid JSON in the following format:
   "objective": "...",
   "skills": [...],
   "education": [...],
-  "jobHistory": [...],
-  "bio": "..."
+  "jobHistory": [...]
 }
 
 Specific requirements:
@@ -51,11 +60,29 @@ ${jobText}
 
     const data = await geminiRes.json();
     const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-
     const cleaned = raw.replace(/```json|```/g, "").trim();
+    // Store the unformatted resume for later GET
+    if (jobAdId && userId) {
+      resumeRawText[`${userId}_${jobAdId}`] = cleaned;
+    }
+
+    // If the user only wants unformatted resume text (not JSON), allow a query param or flag
+    const unformatted = req.nextUrl?.searchParams?.get('unformatted');
+
+    // If unformatted flag is set, return the raw text (no JSON parsing)
+    if (unformatted === 'true') {
+      if (jobAdId && userId) {
+        resumeStatus[`${userId}_${jobAdId}`] = 'completed';
+      }
+      return NextResponse.json({ resume: cleaned });
+    }
 
     try {
       const parsed = JSON.parse(cleaned);
+      // Mark as completed
+      if (jobAdId && userId) {
+        resumeStatus[`${userId}_${jobAdId}`] = 'completed';
+      }
       return NextResponse.json({ resume: parsed });
     } catch (err) {
       console.error("Failed to parse Gemini response:", raw);
@@ -65,4 +92,21 @@ ${jobText}
     console.error("POST /api/generateResume error:", err);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
+}
+
+export async function GET(req: NextRequest) {
+  // Polling endpoint: /api/generateResume?jobAdId=...&userId=...
+  const { searchParams } = new URL(req.url);
+  const jobAdId = searchParams.get("jobAdId");
+  const userId = searchParams.get("userId");
+  const unformatted = searchParams.get("unformatted");
+  if (!jobAdId || !userId) {
+    return NextResponse.json({ error: "Missing jobAdId or userId" }, { status: 400 });
+  }
+  if (unformatted === 'true') {
+    const raw = resumeRawText[`${userId}_${jobAdId}`] || "";
+    return NextResponse.json({ resume: raw });
+  }
+  const status = resumeStatus[`${userId}_${jobAdId}`] || 'idle';
+  return NextResponse.json({ status });
 }
