@@ -1,3 +1,5 @@
+
+
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -15,7 +17,46 @@ interface JobAd {
   submittedAt: string;
 }
 
+
 const JobAdSubmission: React.FC = () => {
+  // Stepper state (move this to the top so it's available for all hooks)
+  const [currentStep, setCurrentStep] = useState(0);
+  const steps = [
+    { label: 'Submit Job Ad' },
+    { label: 'AI Resume Generation' },
+    { label: 'View AI Resume' },
+    { label: 'Format' },
+    { label: 'Download' },
+  ];
+  // LaTeX template state
+  const [latexTemplateFile, setLatexTemplateFile] = useState<File | null>(null);
+  const [latexTemplateContent, setLatexTemplateContent] = useState<string>("");
+  const [latexUploadError, setLatexUploadError] = useState<string | null>(null);
+  const [latexTemplates, setLatexTemplates] = useState<any[]>([]);
+  const [selectedLatexTemplateId, setSelectedLatexTemplateId] = useState<string | null>(null);
+  const [isLoadingLatexTemplates, setIsLoadingLatexTemplates] = useState(false);
+  // Fetch LaTeX templates for Format step
+  useEffect(() => {
+    if (currentStep === 3 && latexTemplates.length === 0 && !isLoadingLatexTemplates) {
+      setIsLoadingLatexTemplates(true);
+      fetch("/api/templates")
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data.templates)) {
+            setLatexTemplates(data.templates);
+          } else if (Array.isArray(data)) {
+            setLatexTemplates(data);
+          } else {
+            setLatexTemplates([]);
+          }
+          setIsLoadingLatexTemplates(false);
+        })
+        .catch(() => {
+          setLatexTemplates([]);
+          setIsLoadingLatexTemplates(false);
+        });
+    }
+  }, [currentStep, latexTemplates.length, isLoadingLatexTemplates]);
   const [adText, setAdText] = useState("");
   const [ads, setAds] = useState<JobAd[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -35,6 +76,20 @@ const JobAdSubmission: React.FC = () => {
   const [jobAdStatus, setJobAdStatus] = useState<{ [adId: string]: 'idle' | 'processing' | 'completed' }>({});
   const [viewResume, setViewResume] = useState<any | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+
+  // Persist downloadUrl in sessionStorage so it survives step changes and reloads
+  useEffect(() => {
+    // Restore downloadUrl if present
+    const stored = sessionStorage.getItem("downloadUrl");
+    if (stored) setDownloadUrl(stored);
+  }, []);
+  useEffect(() => {
+    if (downloadUrl) {
+      sessionStorage.setItem("downloadUrl", downloadUrl);
+    } else {
+      sessionStorage.removeItem("downloadUrl");
+    }
+  }, [downloadUrl]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
@@ -47,15 +102,6 @@ const JobAdSubmission: React.FC = () => {
   // Add refs for auto-scroll
   const step2Ref = useRef<HTMLDivElement | null>(null);
   const step3Ref = useRef<HTMLDivElement | null>(null);
-
-  // Stepper state
-  const [currentStep, setCurrentStep] = useState(0);
-  const steps = [
-    { label: 'Submit Job Ad' },
-    { label: 'AI Resume Generation' },
-    { label: 'View AI Resume' },
-    { label: 'Format & Download' },
-  ];
 
   // Get Firebase user
   useEffect(() => {
@@ -148,7 +194,7 @@ const JobAdSubmission: React.FC = () => {
         return alert("Missing required fields.");
       }
 
-      await fetch("/api/generateResume", {
+      await fetch(`/api/generateResume?unformatted=true`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobText, editableResume, jobAdId: selectedJobAdId, userId: user.uid }),
@@ -325,9 +371,10 @@ const JobAdSubmission: React.FC = () => {
     if (currentStep > 0) setCurrentStep(currentStep - 1);
   };
 
-  // Fetch unformatted resume automatically when viewResume changes in step 3
+
+  // Fetch unformatted resume automatically when entering step 2 (View AI Resume) or step 3 (Format)
   useEffect(() => {
-    if (currentStep === 2 && selectedJobAdId && user) {
+    if ((currentStep === 2 || currentStep === 3) && selectedJobAdId && user) {
       setIsLoadingUnformatted(true);
       setUnformattedError(null);
       fetch(`/api/generateResume?jobAdId=${selectedJobAdId}&userId=${user.uid}&unformatted=true`)
@@ -343,12 +390,60 @@ const JobAdSubmission: React.FC = () => {
           setUnformattedError("Failed to fetch unformatted resume.");
           setIsLoadingUnformatted(false);
         });
-    } else {
+    } else if (currentStep === 2 || currentStep === 3) {
       setViewResumeUnformatted("");
       setIsLoadingUnformatted(false);
       setUnformattedError(null);
     }
   }, [currentStep, selectedJobAdId, user]);
+
+  // Auto-format resume with default template when entering Download step if not already formatted
+  useEffect(() => {
+    const shouldAutoFormat = currentStep === 4 && !downloadUrl && (viewResumeUnformatted || viewResume) && latexTemplates.length > 0;
+    if (shouldAutoFormat) {
+      let templateId = selectedLatexTemplateId;
+      let templateContent = latexTemplateContent;
+      if ((!templateId || !templateContent) && latexTemplates.length > 0) {
+        templateId = latexTemplates[0].id || latexTemplates[0].templateId;
+        templateContent = latexTemplates[0].content || "";
+        setSelectedLatexTemplateId(templateId);
+        setLatexTemplateContent(templateContent);
+      }
+      setTimeout(async () => {
+        if (!templateContent) return;
+        try {
+          const res = await fetch("/api/resumes/format", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              resume: viewResume || viewResumeUnformatted,
+              resumeId: selectedResumeId,
+              latexTemplate: templateContent,
+              format: "latex-pdf"
+            })
+          });
+          const contentType = res.headers.get('Content-Type') || '';
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.downloadUrl) {
+              setDownloadUrl(data.downloadUrl);
+              return;
+            }
+          }
+          if (!res.ok) throw new Error("Failed to format resume");
+          const blob = await res.blob();
+          let filename = "formatted_resume.pdf";
+          const disposition = res.headers.get('Content-Disposition');
+          if (disposition) {
+            const match = disposition.match(/filename="?([^";]+)"?/);
+            if (match) filename = match[1];
+          }
+          const url = window.URL.createObjectURL(blob);
+          setDownloadUrl(url);
+        } catch {}
+      }, 0);
+    }
+  }, [currentStep, downloadUrl, viewResumeUnformatted, viewResume, latexTemplates, selectedLatexTemplateId, latexTemplateContent, selectedResumeId]);
 
   return (
     <>
@@ -416,8 +511,8 @@ const JobAdSubmission: React.FC = () => {
               {/* Job Ads List as cards (with preview/delete) */}
               <div className="space-y-4">
                 {ads.length === 0 ? (
-                  <div className="text-gray-500 dark:text-gray-400 text-center py-8 border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl bg-white/70 dark:bg-gray-900/70">
-                    No job ads submitted yet.
+            <div className="text-gray-500 dark:text-gray-400 text-center py-8 border border-dashed border-gray-300 dark:border-gray-700 rounded-2xl bg-white/70 dark:bg-gray-900/70">
+              No job ads submitted yet. You can upload your own .tex file below.
                   </div>
                 ) : (
                   <>
@@ -588,123 +683,152 @@ const JobAdSubmission: React.FC = () => {
                 <div className="mb-4">
                   <div className="font-semibold text-indigo-700 dark:text-indigo-300 mb-1">Unformatted Resume</div>
                   <pre className="text-xs md:text-sm whitespace-pre-wrap break-words bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto mb-4 border border-indigo-100 dark:border-indigo-700">
-                    {viewResumeUnformatted}
+                    {viewResumeUnformatted.replace(/\(Note to Applicant: This section is CRUCIAL[\s\S]*?Example Placeholder Project:[\s\S]*?\*\s+Applied computer science and analysis principles to solve moderate-scale data processing and user interaction challenges\.[\s\S]*?\)/g, "")}
                   </pre>
                 </div>
               )}
-              <pre className="text-xs md:text-sm whitespace-pre-wrap break-words bg-gray-100 dark:bg-gray-800 rounded p-4 overflow-x-auto mb-4">
-                {JSON.stringify(viewResume, null, 2)}
-              </pre>
             </>
           )}
-          {/* Step 4: Format & Download */}
-          {currentStep === 3 && viewResume && (
+          {/* Step 4: Format */}
+          {currentStep === 3 && (viewResumeUnformatted || viewResume) && (
             <>
-              <h2 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-300 flex items-center gap-2">4. Format & Download</h2>
-              {/* Template selection UI */}
-              <div className="mb-4">
-                <h5 className="font-semibold text-indigo-700 dark:text-indigo-300 mb-2">Choose a Resume Template:</h5>
-                {isLoadingTemplates ? (
-                  <div className="text-gray-500 dark:text-gray-400">Loading templates...</div>
-                ) : templates.length === 0 ? (
-                  <div className="text-gray-500 dark:text-gray-400">No templates available. Default will be used.</div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    {templates.map((tpl: any) => (
-                      <div
-                        key={tpl.id || tpl.templateId}
-                        className={`relative border rounded-xl p-4 flex flex-col items-center cursor-pointer transition shadow-md hover:shadow-xl bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 ${selectedTemplateId === (tpl.id || tpl.templateId) ? 'border-indigo-500 ring-2 ring-indigo-400' : 'border-gray-200 dark:border-gray-700'}`}
-                        onClick={() => setSelectedTemplateId(tpl.id || tpl.templateId)}
-                        tabIndex={0}
-                        role="button"
-                        aria-pressed={selectedTemplateId === (tpl.id || tpl.templateId)}
-                      >
-                        {selectedTemplateId === (tpl.id || tpl.templateId) && (
-                          <span className="absolute top-2 right-2 text-green-600 dark:text-green-400 text-lg" title="Selected">✔️</span>
-                        )}
-                        {tpl.imageUrl ? (
-                          <img src={tpl.imageUrl} alt={tpl.name} className="w-28 h-28 object-contain mb-2 rounded shadow" />
-                        ) : (
-                          <div className="w-28 h-28 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-2 text-gray-400 text-4xl">📄</div>
-                        )}
-                        <div className="font-bold text-indigo-700 dark:text-indigo-300 text-base mb-1 text-center line-clamp-2 min-h-[2.5rem]">{tpl.name || 'Untitled Template'}</div>
-                        {tpl.description && (
-                          <div className="text-xs text-gray-600 dark:text-gray-400 text-center mb-1 line-clamp-3 min-h-[3rem]">{tpl.description}</div>
-                        )}
-                        <div className="text-xs text-gray-400 dark:text-gray-500 mb-2">{tpl.id || tpl.templateId}</div>
-                        <button
-                          className="mt-auto px-3 py-1 rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-200 text-xs font-semibold hover:bg-blue-200 dark:hover:bg-blue-700 transition"
-                          type="button"
-                          onClick={e => {
-                            e.stopPropagation();
-                            setTemplatePreview(tpl);
-                          }}
-                        >Preview</button>
-                      </div>
-                    ))}
+              <h2 className="text-xl font-bold mb-4 text-blue-700 dark:text-blue-300 flex items-center gap-2">4. Format</h2>
+              {/* Format Resume Section */}
+              <div className="mb-8">
+                <h3 className="font-semibold text-indigo-700 dark:text-indigo-300 mb-2 text-lg">Format Resume (LaTeX)</h3>
+                <div className="mb-4">
+                  <h5 className="font-semibold text-indigo-700 dark:text-indigo-300 mb-2">Choose a LaTeX Template:</h5>
+                  {isLoadingLatexTemplates ? (
+                    <div className="text-gray-500 dark:text-gray-400">Loading templates...</div>
+                  ) : latexTemplates.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-4">
+                      {latexTemplates.map((tpl: any) => (
+                        <label key={tpl.id || tpl.templateId} className={`relative border rounded-xl p-4 flex flex-col items-center cursor-pointer transition shadow-md hover:shadow-xl bg-gradient-to-br from-indigo-50 via-white to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 ${selectedLatexTemplateId === (tpl.id || tpl.templateId) ? 'border-indigo-500 ring-2 ring-indigo-400' : 'border-gray-200 dark:border-gray-700'}`}>
+                          <input
+                            type="radio"
+                            name="latex-template"
+                            className="absolute left-2 top-2"
+                            checked={selectedLatexTemplateId === (tpl.id || tpl.templateId)}
+                            onChange={() => {
+                              setSelectedLatexTemplateId(tpl.id || tpl.templateId);
+                              setLatexTemplateContent(tpl.content || "");
+                              setLatexTemplateFile(null);
+                            }}
+                          />
+                          {/* Dynamic preview image using /api/resumePreview */}
+                          {selectedResumeId ? (
+                            <img
+                              src={`/api/resumePreview?resumeId=${encodeURIComponent(selectedResumeId)}&templateId=${encodeURIComponent(tpl.id || tpl.templateId)}`}
+                              alt={tpl.name}
+                              className="w-40 h-40 object-contain mb-2 rounded shadow bg-white"
+                              onError={e => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-40 h-40 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-2 text-gray-400 text-5xl">📄</div>
+                          )}
+                          <div className="font-bold text-indigo-700 dark:text-indigo-300 text-base mb-1 text-center line-clamp-2 min-h-[2.5rem]">{tpl.name || 'Untitled Template'}</div>
+                          {tpl.description && (
+                            <div className="text-xs text-gray-600 dark:text-gray-400 text-center mb-1 line-clamp-3 min-h-[3rem]">{tpl.description}</div>
+                          )}
+                          {/* Template ID hidden from user */}
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  className="mt-2 px-5 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition shadow"
+                  onClick={async () => {
+                    setDownloadUrl(null);
+                    // Always ensure a template is selected: default to first if none
+                    let templateId = selectedLatexTemplateId;
+                    let templateContent = latexTemplateContent;
+                    if ((!templateId || !templateContent) && latexTemplates.length > 0) {
+                      templateId = latexTemplates[0].id || latexTemplates[0].templateId;
+                      templateContent = latexTemplates[0].content || "";
+                      setSelectedLatexTemplateId(templateId);
+                      setLatexTemplateContent(templateContent);
+                    }
+                    // Wait for state to update before proceeding (React batching)
+                    await new Promise(r => setTimeout(r, 0));
+                    if (!templateContent || templateContent.trim() === "") {
+                      alert("No LaTeX template available or template is empty. Please select a valid template.");
+                      return;
+                    }
+                    try {
+                      const res = await fetch("/api/resumes/format", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          resume: viewResume || viewResumeUnformatted,
+                          resumeId: selectedResumeId,
+                          latexTemplate: templateContent,
+                          format: "latex-pdf"
+                        })
+                      });
+                      const contentType = res.headers.get('Content-Type') || '';
+                      if (contentType.includes('application/json')) {
+                        const data = await res.json();
+                        if (data.downloadUrl) {
+                          setDownloadUrl(data.downloadUrl);
+                          return;
+                        } else {
+                          alert("No download URL returned by server.");
+                          return;
+                        }
+                      }
+                      if (!res.ok) throw new Error("Failed to format resume");
+                      const blob = await res.blob();
+                      let filename = "formatted_resume.pdf";
+                      const disposition = res.headers.get('Content-Disposition');
+                      if (disposition) {
+                        const match = disposition.match(/filename="?([^";]+)"?/);
+                        if (match) filename = match[1];
+                      }
+                      const url = window.URL.createObjectURL(blob);
+                      setDownloadUrl(url);
+                    } catch (err) {
+                      alert("Failed to format and download resume.");
+                    }
+                  }}
+                >Format Resume (LaTeX)</button>
+                {/* Always show download button if downloadUrl is available, even if user did not click Format */}
+                {downloadUrl && (
+                  <div className="mt-6 flex flex-col items-center">
+                    <a
+                      href={downloadUrl}
+                      className="inline-block px-6 py-3 rounded bg-green-600 text-white font-bold text-lg shadow hover:bg-green-700 transition mb-2"
+                      download
+                    >
+                      <span className="mr-2">⬇️</span> Download Formatted Resume
+                    </a>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">If the download does not start, right-click and choose "Save link as..."</span>
                   </div>
                 )}
               </div>
-              <button
-                className="mt-2 px-5 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition shadow"
-                onClick={async () => {
-                  setDownloadUrl(null);
-                  try {
-                    const res = await fetch("/api/resumes/format", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        resume: viewResume,
-                        resumeId: selectedResumeId,
-                        templateId: selectedTemplateId || undefined, // fallback to default if not selected
-                        format: "pdf" // Explicitly request PDF output
-                      })
-                    });
-                    // Try to parse JSON for downloadUrl
-                    const contentType = res.headers.get('Content-Type') || '';
-                    if (contentType.includes('application/json')) {
-                      const data = await res.json();
-                      if (data.downloadUrl) {
-                        setDownloadUrl(data.downloadUrl);
-                        return;
-                      } else {
-                        alert("No download URL returned by server.");
-                        return;
-                      }
-                    }
-                    // Fallback: blob download
-                    if (!res.ok) throw new Error("Failed to format resume");
-                    const blob = await res.blob();
-                    let filename = "formatted_resume.pdf";
-                    const disposition = res.headers.get('Content-Disposition');
-                    if (disposition) {
-                      const match = disposition.match(/filename="?([^";]+)"?/);
-                      if (match) filename = match[1];
-                    }
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(() => {
-                      window.URL.revokeObjectURL(url);
-                      document.body.removeChild(a);
-                    }, 100);
-                  } catch (err) {
-                    alert("Failed to format and download resume.");
-                  }
-                }}
-              >Format Resume & Download</button>
-              {downloadUrl && (
-                <a
-                  href={downloadUrl}
-                  className="mt-4 inline-block px-5 py-2 rounded bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow text-center"
-                  download
-                >
-                  Download Resume
-                </a>
-              )}
+            </>
+          )}
+          {/* Step 5: Download */}
+          {currentStep === 4 && (
+            <>
+              <h2 className="text-xl font-bold mb-4 text-green-700 dark:text-green-300 flex items-center gap-2">5. Download</h2>
+              <div className="mb-4 flex flex-col items-center">
+                <h3 className="font-semibold text-green-700 dark:text-green-300 mb-2 text-lg">Download Resume</h3>
+                {downloadUrl ? (
+                  <a
+                    href={downloadUrl}
+                    className="inline-block px-6 py-3 rounded bg-green-600 text-white font-bold text-lg shadow hover:bg-green-700 transition mb-2"
+                    download
+                  >
+                    <span className="mr-2">⬇️</span> Download Formatted Resume
+                  </a>
+                ) : (
+                  <span className="text-gray-500 dark:text-gray-400">Formatting your resume... This may take a few seconds. The download link will appear automatically when ready.</span>
+                )}
+                <span className="text-xs text-gray-500 dark:text-gray-400">If the download does not start, right-click and choose "Save link as..."</span>
+              </div>
             </>
           )}
           {/* Stepper Navigation Buttons */}
@@ -720,8 +844,10 @@ const JobAdSubmission: React.FC = () => {
               disabled={
                 (currentStep === 0 && ads.length === 0) ||
                 (currentStep === 1 && (!selectedResumeId || !selectedJobAdId || isGenerating || jobAdStatus[selectedJobAdId] !== 'completed')) ||
-                (currentStep === 2 && !viewResume) ||
-                currentStep === steps.length - 1
+                (currentStep === 2 && !viewResumeUnformatted && !viewResume) ||
+                (currentStep === 3 && (!viewResumeUnformatted && !viewResume)) ||
+                (currentStep === 3 && !!downloadUrl) || // Prevent going to Download before formatting
+                (currentStep === 4) // Last step
               }
             >Next</button>
           </div>
@@ -793,6 +919,8 @@ const JobAdSubmission: React.FC = () => {
                 className="mt-2 px-5 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition shadow"
                 onClick={async () => {
                   setDownloadUrl(null);
+                  // TODO: Integrate backend call to generate LaTeX .tex file and compile to PDF
+                  // For now, fallback to existing formatting logic
                   try {
                     const res = await fetch("/api/resumes/format", {
                       method: "POST",
@@ -840,15 +968,6 @@ const JobAdSubmission: React.FC = () => {
                   }
                 }}
               >Format Resume & Download</button>
-              {downloadUrl && (
-                <a
-                  href={downloadUrl}
-                  className="mt-4 inline-block px-5 py-2 rounded bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow text-center"
-                  download
-                >
-                  Download Resume
-                </a>
-              )}
             </div>
           </div>
         )}
