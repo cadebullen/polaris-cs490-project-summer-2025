@@ -35,6 +35,7 @@ const JobAdSubmission: React.FC = () => {
   const [latexTemplates, setLatexTemplates] = useState<any[]>([]);
   const [selectedLatexTemplateId, setSelectedLatexTemplateId] = useState<string | null>(null);
   const [isLoadingLatexTemplates, setIsLoadingLatexTemplates] = useState(false);
+  const [isFormattingResume, setIsFormattingResume] = useState(false);
   // Fetch LaTeX templates for Format step
   useEffect(() => {
     if (currentStep === 3 && latexTemplates.length === 0 && !isLoadingLatexTemplates) {
@@ -585,18 +586,31 @@ const JobAdSubmission: React.FC = () => {
                           </div>
                           {/* AI Resume section (if available) */}
                           {jobAdStatus[previewAd.id] === 'completed' && downloadUrl && (
-                            <div className="mt-4 p-4 rounded-lg bg-green-50 dark:bg-green-900/50 border border-green-200 dark:border-green-700">
-                              <h4 className="font-semibold text-green-800 dark:text-green-200 mb-2">AI Resume Generated!</h4>
-                              <p className="text-sm text-green-700 dark:text-green-300 mb-2">
-                                Your AI-generated resume is ready. You can download it in the Format & Download step.
+                            <div className="mt-4 p-4 rounded-xl bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/30 dark:to-blue-900/30 border border-green-200 dark:border-green-700">
+                              <div className="flex items-center mb-3">
+                                <span className="text-2xl mr-2">🎉</span>
+                                <h4 className="font-bold text-green-800 dark:text-green-200">AI Resume Generated!</h4>
+                              </div>
+                              <p className="text-sm text-green-700 dark:text-green-300 mb-4">
+                                Your personalized resume is ready! Continue to Step 5 for the full download experience, or get it now:
                               </p>
-                              <a
-                                href={downloadUrl}
-                                className="inline-block px-4 py-2 text-sm font-semibold rounded-lg bg-green-600 text-white shadow-md hover:bg-green-700 transition-all"
-                                download
-                              >
-                                <span className="mr-2">⬇️</span> Download Resume
-                              </a>
+                              <div className="flex items-center space-x-3">
+                                <a
+                                  href={downloadUrl}
+                                  className="inline-flex items-center px-4 py-2 rounded-lg bg-green-600 text-white font-semibold shadow-md hover:bg-green-700 transform hover:scale-105 transition-all"
+                                  download="ai-generated-resume.pdf"
+                                >
+                                  <span className="mr-2">📄</span>
+                                  Quick Download
+                                </a>
+                                <button
+                                  onClick={() => window.open(downloadUrl, '_blank')}
+                                  className="inline-flex items-center px-4 py-2 rounded-lg bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-all"
+                                >
+                                  <span className="mr-2">👁️</span>
+                                  Preview
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -715,19 +729,23 @@ const JobAdSubmission: React.FC = () => {
                               setLatexTemplateFile(null);
                             }}
                           />
-                          {/* Dynamic preview image using /api/resumePreview */}
-                          {selectedResumeId ? (
-                            <img
-                              src={`/api/resumePreview?resumeId=${encodeURIComponent(selectedResumeId)}&templateId=${encodeURIComponent(tpl.id || tpl.templateId)}`}
-                              alt={tpl.name}
-                              className="w-40 h-40 object-contain mb-2 rounded shadow bg-white"
-                              onError={e => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          ) : (
-                            <div className="w-40 h-40 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-2 text-gray-400 text-5xl">📄</div>
-                          )}
+                          {/* Template preview - use live preview API */}
+                          <div className="w-40 h-40 flex flex-col items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 rounded mb-2 overflow-hidden">
+                            {viewResumeUnformatted ? (
+                              <iframe
+                                src={`/api/resumePreview?templateId=${encodeURIComponent(tpl.id || tpl.templateId)}&resumeContent=${encodeURIComponent(viewResumeUnformatted)}`}
+                                className="w-full h-full border-0 rounded scale-[0.3] origin-top-left"
+                                title={`Preview of ${tpl.name || 'Template'}`}
+                                style={{ width: '333%', height: '333%' }}
+                              />
+                            ) : (
+                              <div className="flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
+                                <span className="text-4xl mb-1">📄</span>
+                                <span className="text-xs text-center font-medium">Template Preview</span>
+                                <span className="text-xs text-center opacity-75">Loading...</span>
+                              </div>
+                            )}
+                          </div>
                           <div className="font-bold text-indigo-700 dark:text-indigo-300 text-base mb-1 text-center line-clamp-2 min-h-[2.5rem]">{tpl.name || 'Untitled Template'}</div>
                           {tpl.description && (
                             <div className="text-xs text-gray-600 dark:text-gray-400 text-center mb-1 line-clamp-3 min-h-[3rem]">{tpl.description}</div>
@@ -738,75 +756,163 @@ const JobAdSubmission: React.FC = () => {
                     </div>
                   ) : null}
                 </div>
-                <button
-                  className="mt-2 px-5 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition shadow"
-                  onClick={async () => {
-                    setDownloadUrl(null);
-                    // Always ensure a template is selected: default to first if none
-                    let templateId = selectedLatexTemplateId;
-                    let templateContent = latexTemplateContent;
-                    if ((!templateId || !templateContent) && latexTemplates.length > 0) {
-                      templateId = latexTemplates[0].id || latexTemplates[0].templateId;
-                      templateContent = latexTemplates[0].content || "";
-                      setSelectedLatexTemplateId(templateId);
-                      setLatexTemplateContent(templateContent);
-                    }
-                    // Wait for state to update before proceeding (React batching)
-                    await new Promise(r => setTimeout(r, 0));
-                    if (!templateContent || templateContent.trim() === "") {
-                      alert("No LaTeX template available or template is empty. Please select a valid template.");
-                      return;
-                    }
-                    try {
-                      const res = await fetch("/api/resumes/format", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          resume: viewResume || viewResumeUnformatted,
-                          resumeId: selectedResumeId,
-                          latexTemplate: templateContent,
-                          format: "latex-pdf"
-                        })
-                      });
-                      const contentType = res.headers.get('Content-Type') || '';
-                      if (contentType.includes('application/json')) {
-                        const data = await res.json();
-                        if (data.downloadUrl) {
-                          setDownloadUrl(data.downloadUrl);
-                          return;
-                        } else {
-                          alert("No download URL returned by server.");
-                          return;
-                        }
-                      }
-                      if (!res.ok) throw new Error("Failed to format resume");
-                      const blob = await res.blob();
-                      let filename = "formatted_resume.pdf";
-                      const disposition = res.headers.get('Content-Disposition');
-                      if (disposition) {
-                        const match = disposition.match(/filename="?([^";]+)"?/);
-                        if (match) filename = match[1];
-                      }
-                      const url = window.URL.createObjectURL(blob);
-                      setDownloadUrl(url);
-                    } catch (err) {
-                      alert("Failed to format and download resume.");
-                    }
-                  }}
-                >Format Resume (LaTeX)</button>
-                {/* Always show download button if downloadUrl is available, even if user did not click Format */}
-                {downloadUrl && (
-                  <div className="mt-6 flex flex-col items-center">
-                    <a
-                      href={downloadUrl}
-                      className="inline-block px-6 py-3 rounded bg-green-600 text-white font-bold text-lg shadow hover:bg-green-700 transition mb-2"
-                      download
-                    >
-                      <span className="mr-2">⬇️</span> Download Formatted Resume
-                    </a>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">If the download does not start, right-click and choose "Save link as..."</span>
+                <div className="mt-6 p-6 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 border border-blue-200 dark:border-blue-700">
+                  <div className="flex items-center mb-4">
+                    <span className="text-2xl mr-2">🎨</span>
+                    <h4 className="font-bold text-blue-800 dark:text-blue-200">Choose Your Format</h4>
                   </div>
-                )}
+                  
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Select a template above, then click the button below to format your resume. Once formatted, you'll be able to download it in the next step.
+                  </p>
+                  
+                  <div className="flex flex-col space-y-4">
+                    <button
+                      disabled={isFormattingResume}
+                      className={`inline-flex items-center justify-center px-8 py-4 rounded-xl font-bold text-lg shadow-lg transition-all duration-200 ${
+                        isFormattingResume 
+                          ? 'bg-gray-400 cursor-not-allowed' 
+                          : 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white hover:from-indigo-700 hover:to-indigo-800 transform hover:scale-105'
+                      }`}
+                      onClick={async () => {
+                        setIsFormattingResume(true);
+                        setDownloadUrl(null);
+                        
+                        // Debug current state
+                        console.log('🎨 Format Resume clicked');
+                        console.log('🔍 Current selectedLatexTemplateId:', selectedLatexTemplateId);
+                        console.log('🔍 Current latexTemplateContent length:', latexTemplateContent?.length || 0);
+                        console.log('🔍 Current latexTemplateContent preview:', latexTemplateContent?.substring(0, 100) || 'NO CONTENT');
+                        console.log('🔍 Available templates count:', latexTemplates.length);
+                        if (latexTemplates.length > 0) {
+                          console.log('🔍 First template content preview:', latexTemplates[0].content?.substring(0, 100) || 'NO CONTENT');
+                        }
+                        
+                        // Always ensure a template is selected: default to first if none
+                        let templateId = selectedLatexTemplateId;
+                        let templateContent = latexTemplateContent;
+                        if ((!templateId || !templateContent) && latexTemplates.length > 0) {
+                          console.log('🔧 Auto-selecting first template');
+                          templateId = latexTemplates[0].id || latexTemplates[0].templateId;
+                          templateContent = latexTemplates[0].content || "";
+                          setSelectedLatexTemplateId(templateId);
+                          setLatexTemplateContent(templateContent);
+                          console.log('🔧 Auto-selected template content preview:', templateContent?.substring(0, 100) || 'NO CONTENT');
+                        }
+                        
+                        // Wait for state to update before proceeding (React batching)
+                        await new Promise(r => setTimeout(r, 0));
+                        
+                        console.log('📤 Sending request with template content length:', templateContent?.length || 0);
+                        console.log('📤 Sending request with template content preview:', templateContent?.substring(0, 100) || 'NO CONTENT');
+                        
+                        try {
+                          const res = await fetch("/api/resumes/format", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              resume: viewResume || viewResumeUnformatted,
+                              resumeId: selectedResumeId,
+                              latexTemplate: templateContent,
+                              format: "latex-pdf"
+                            })
+                          });
+                          const contentType = res.headers.get('Content-Type') || '';
+                          if (contentType.includes('application/json')) {
+                            const data = await res.json();
+                            if (data.downloadUrl) {
+                              setDownloadUrl(data.downloadUrl);
+                              setCurrentStep(4); // Move to download step
+                              return;
+                            } else {
+                              alert("No download URL returned by server.");
+                              return;
+                            }
+                          }
+                          if (!res.ok) throw new Error("Failed to format resume");
+                          const blob = await res.blob();
+                          let filename = "formatted_resume.pdf";
+                          const disposition = res.headers.get('Content-Disposition');
+                          if (disposition) {
+                            const match = disposition.match(/filename="?([^";]+)"?/);
+                            if (match) filename = match[1];
+                          }
+                          const url = window.URL.createObjectURL(blob);
+                          setDownloadUrl(url);
+                          setCurrentStep(4); // Move to download step
+                        } catch (err) {
+                          alert("Failed to format resume.");
+                        } finally {
+                          setIsFormattingResume(false);
+                        }
+                      }}
+                    >
+                      {isFormattingResume ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-3"></div>
+                          Formatting Resume...
+                        </>
+                      ) : (
+                        <>
+                          <span className="mr-3">🎨</span>
+                          Format Resume
+                          <span className="ml-3">➡️</span>
+                        </>
+                      )}
+                    </button>
+                    
+                    <div className="text-center">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">or</p>
+                      <button
+                        className="inline-flex items-center px-6 py-3 rounded-lg bg-gradient-to-r from-gray-500 to-gray-600 text-white font-semibold text-sm shadow-md hover:from-gray-600 hover:to-gray-700 transform hover:scale-105 transition-all duration-200"
+                        onClick={async () => {
+                          setDownloadUrl(null);
+                          try {
+                            const res = await fetch("/api/resumes/format", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                resume: viewResume || viewResumeUnformatted,
+                                resumeId: selectedResumeId,
+                                latexTemplate: "", // Empty template will use simple default
+                                format: "latex-pdf"
+                              })
+                            });
+                            const contentType = res.headers.get('Content-Type') || '';
+                            if (contentType.includes('application/json')) {
+                              const data = await res.json();
+                              if (data.downloadUrl) {
+                                setDownloadUrl(data.downloadUrl);
+                                setCurrentStep(4); // Move to download step
+                                return;
+                              } else {
+                                alert("No download URL returned by server.");
+                                return;
+                              }
+                            }
+                            if (!res.ok) throw new Error("Failed to format resume");
+                            const blob = await res.blob();
+                            let filename = "simple_resume.pdf";
+                            const disposition = res.headers.get('Content-Disposition');
+                            if (disposition) {
+                              const match = disposition.match(/filename="?([^";]+)"?/);
+                              if (match) filename = match[1];
+                            }
+                            const url = window.URL.createObjectURL(blob);
+                            setDownloadUrl(url);
+                            setCurrentStep(4); // Move to download step
+                          } catch (err) {
+                            alert("Failed to create simple resume.");
+                          }
+                        }}
+                      >
+                        <span className="mr-2">📄</span>
+                        Skip Formatting & Download Simple
+                        <span className="ml-2">⤵️</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -815,19 +921,81 @@ const JobAdSubmission: React.FC = () => {
             <>
               <h2 className="text-xl font-bold mb-4 text-green-700 dark:text-green-300 flex items-center gap-2">5. Download</h2>
               <div className="mb-4 flex flex-col items-center">
-                <h3 className="font-semibold text-green-700 dark:text-green-300 mb-2 text-lg">Download Resume</h3>
+                <h3 className="font-semibold text-green-700 dark:text-green-300 mb-4 text-lg">Your Resume is Ready!</h3>
                 {downloadUrl ? (
-                  <a
-                    href={downloadUrl}
-                    className="inline-block px-6 py-3 rounded bg-green-600 text-white font-bold text-lg shadow hover:bg-green-700 transition mb-2"
-                    download
-                  >
-                    <span className="mr-2">⬇️</span> Download Formatted Resume
-                  </a>
+                  <div className="flex flex-col items-center space-y-4">
+                    {/* Primary download button */}
+                    <a
+                      href={downloadUrl}
+                      className="inline-flex items-center px-8 py-4 rounded-xl bg-gradient-to-r from-green-600 to-green-700 text-white font-bold text-xl shadow-lg hover:from-green-700 hover:to-green-800 transform hover:scale-105 transition-all duration-200"
+                      download="resume.pdf"
+                    >
+                      <span className="mr-3 text-2xl">📄</span>
+                      Download My Resume
+                      <span className="ml-3 text-2xl">⬇️</span>
+                    </a>
+                    
+                    {/* Secondary options */}
+                    <div className="flex flex-col items-center space-y-2">
+                      <div className="flex items-center space-x-4">
+                        <button
+                          onClick={() => window.open(downloadUrl, '_blank')}
+                          className="inline-flex items-center px-4 py-2 rounded-lg bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-all"
+                        >
+                          <span className="mr-2">👁️</span>
+                          Preview in Browser
+                        </button>
+                        
+                        <button
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(downloadUrl);
+                              alert('Download link copied to clipboard!');
+                            } catch {
+                              alert('Could not copy link. Please use the download button above.');
+                            }
+                          }}
+                          className="inline-flex items-center px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                        >
+                          <span className="mr-2">📋</span>
+                          Copy Link
+                        </button>
+                      </div>
+                      
+                      <p className="text-xs text-gray-500 dark:text-gray-400 text-center max-w-md">
+                        <strong>Having trouble downloading?</strong><br/>
+                        Try right-clicking the download button and selecting "Save link as..." or use the preview option above.
+                      </p>
+                    </div>
+                    
+                    {/* Success message */}
+                    <div className="mt-4 p-4 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700 max-w-md">
+                      <div className="flex items-center">
+                        <span className="text-green-600 dark:text-green-400 mr-2">✅</span>
+                        <p className="text-sm text-green-700 dark:text-green-300">
+                          <strong>Success!</strong> Your resume has been formatted and is ready for download.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  <span className="text-gray-500 dark:text-gray-400">Formatting your resume... This may take a few seconds. The download link will appear automatically when ready.</span>
+                  <div className="flex flex-col items-center space-y-4">
+                    {/* Loading animation */}
+                    <div className="flex items-center space-x-3">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+                      <span className="text-lg text-gray-600 dark:text-gray-400">Formatting your resume...</span>
+                    </div>
+                    
+                    <div className="text-center max-w-md">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+                        We're using professional LaTeX formatting to create a beautiful PDF. This usually takes 10-30 seconds.
+                      </p>
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div className="bg-green-600 h-2 rounded-full animate-pulse w-3/5"></div>
+                      </div>
+                    </div>
+                  </div>
                 )}
-                <span className="text-xs text-gray-500 dark:text-gray-400">If the download does not start, right-click and choose "Save link as..."</span>
               </div>
             </>
           )}
@@ -838,18 +1006,18 @@ const JobAdSubmission: React.FC = () => {
               onClick={handleBack}
               disabled={currentStep === 0}
             >Back</button>
-            <button
-              className="px-6 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition"
-              onClick={handleNext}
-              disabled={
-                (currentStep === 0 && ads.length === 0) ||
-                (currentStep === 1 && (!selectedResumeId || !selectedJobAdId || isGenerating || jobAdStatus[selectedJobAdId] !== 'completed')) ||
-                (currentStep === 2 && !viewResumeUnformatted && !viewResume) ||
-                (currentStep === 3 && (!viewResumeUnformatted && !viewResume)) ||
-                (currentStep === 3 && !!downloadUrl) || // Prevent going to Download before formatting
-                (currentStep === 4) // Last step
-              }
-            >Next</button>
+            {currentStep !== 4 && currentStep !== 3 && (
+              <button
+                className="px-6 py-2 rounded bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition"
+                onClick={handleNext}
+                disabled={
+                  (currentStep === 0 && ads.length === 0) ||
+                  (currentStep === 1 && (!selectedResumeId || !selectedJobAdId || isGenerating || jobAdStatus[selectedJobAdId] !== 'completed')) ||
+                  (currentStep === 2 && !viewResumeUnformatted && !viewResume)
+                  // Note: Step 3 (format) should use "Format Resume" button instead of Next button
+                }
+              >Next</button>
+            )}
           </div>
         </div>
         {/* Toast notification for immediate feedback */}
@@ -892,11 +1060,22 @@ const JobAdSubmission: React.FC = () => {
                         {selectedTemplateId === (tpl.id || tpl.templateId) && (
                           <span className="absolute top-2 right-2 text-green-600 dark:text-green-400 text-lg" title="Selected">✔️</span>
                         )}
-                        {tpl.imageUrl ? (
-                          <img src={tpl.imageUrl} alt={tpl.name} className="w-28 h-28 object-contain mb-2 rounded shadow" />
-                        ) : (
-                          <div className="w-28 h-28 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded mb-2 text-gray-400 text-4xl">📄</div>
-                        )}
+                        {/* Template preview - use live preview API */}
+                        <div className="w-28 h-28 flex flex-col items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 rounded mb-2 overflow-hidden">
+                          {viewResume ? (
+                            <iframe
+                              src={`/api/resumePreview?templateId=${encodeURIComponent(tpl.id || tpl.templateId)}&resumeContent=${encodeURIComponent(JSON.stringify(viewResume))}`}
+                              className="w-full h-full border-0 rounded scale-[0.2] origin-top-left"
+                              title={`Preview of ${tpl.name || 'Template'}`}
+                              style={{ width: '500%', height: '500%' }}
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center justify-center text-gray-500 dark:text-gray-400">
+                              <span className="text-2xl mb-1">📄</span>
+                              <span className="text-xs text-center font-medium">Template</span>
+                            </div>
+                          )}
+                        </div>
                         <div className="font-bold text-indigo-700 dark:text-indigo-300 text-base mb-1 text-center line-clamp-2 min-h-[2.5rem]">{tpl.name || 'Untitled Template'}</div>
                         {tpl.description && (
                           <div className="text-xs text-gray-600 dark:text-gray-400 text-center mb-1 line-clamp-3 min-h-[3rem]">{tpl.description}</div>

@@ -75,6 +75,14 @@ export default function SidePanel({ isSidePanelOpen, onForceHome, onClose }: Sid
                         </Link>
                     </li>
                     <li>
+                        <Link
+                        href="/job-advice"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-800 transition">
+                            <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><path d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            Resume Advice
+                        </Link>
+                    </li>
+                    <li>
                         <Link href="/home/settings" className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-800 transition">
                             <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7zm7.94-2.06a1 1 0 00.26-1.09l-1.43-4.14a1 1 0 00-.76-.65l-4.14-1.43a1 1 0 00-1.09.26l-2.83 2.83a1 1 0 00-.26 1.09l1.43 4.14a1 1 0 00.76.65l4.14 1.43a1 1 0 001.09-.26l2.83-2.83z" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                             Settings
