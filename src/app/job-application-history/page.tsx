@@ -14,7 +14,7 @@ type Application = {
   location?: string;
   pay?: string;
   overview?: string;
-  expectations?: string;
+  expectations?: string | { [key: string]: string };
 };
 
 export default function JobApplicationHistoryPage() {
@@ -83,7 +83,7 @@ export default function JobApplicationHistoryPage() {
                       {app.location && <div className="text-gray-700 dark:text-gray-300"><span className="font-semibold">Location:</span> {app.location}</div>}
                       {app.pay && <div className="text-gray-700 dark:text-gray-300 truncate"><span className="font-semibold">Pay:</span> {app.pay}</div>}
                       {app.overview && <div className="text-gray-700 dark:text-gray-300"><span className="font-semibold">Overview:</span> {app.overview}</div>}
-                      {app.expectations && <div className="text-gray-700 dark:text-gray-300"><span className="font-semibold">Expectations:</span> {app.expectations}</div>}
+                      {app.expectations && typeof app.expectations === "object" ? (<div className="text-gray-700 dark:text-gray-300"><span className="font-semibold">Expectations:</span><ul className="list-disc ml-6">{Object.entries(app.expectations).map(([key, value]) => (<li key={key}><b>{key}:</b> {typeof value === "string" ? value : JSON.stringify(value)}</li>))}</ul></div>) : app.expectations ? (<div className="text-gray-700 dark:text-gray-300"><span className="font-semibold">Expectations:</span> {app.expectations}</div>) : null}
                       <button
                         className="mt-2 w-fit px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-500 text-white rounded-lg font-bold shadow hover:from-blue-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition text-base"
                         onClick={() => setSelectedApp(app)}
@@ -102,8 +102,8 @@ export default function JobApplicationHistoryPage() {
                         <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Date Applied</th>
                         <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Location</th>
                         <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Pay</th>
-                        <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Overview</th>
-                        <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Expectations</th>
+                        {/* <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Overview</th> */}
+                        {/* <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Expectations</th> */}
                         <th className="py-3 px-5 text-left font-semibold text-indigo-700 dark:text-indigo-300">Details</th>
                       </tr>
                     </thead>
@@ -114,9 +114,9 @@ export default function JobApplicationHistoryPage() {
                           <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{app.company}</td>
                           <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{app.createdAt ? new Date(app.createdAt).toLocaleString() : ""}</td>
                           <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{app.location || "-"}</td>
-                          <td className="py-3 px-5 text-gray-700 dark:text-gray-300 truncate max-w-[120px]">{app.pay || "-"}</td>
-                          <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{app.overview ? app.overview.slice(0, 40) + (app.overview.length > 40 ? '...' : '') : "-"}</td>
-                          <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{app.expectations ? app.expectations.slice(0, 40) + (app.expectations.length > 40 ? '...' : '') : "-"}</td>
+                          <td className="py-3 px-5 text-gray-700 dark:text-gray-300 truncate max-w-[120px]">{app.pay? (() => {const match = app.pay.replace(/,/g, '').match(/\d{2,7}/g);if (!match) return app.pay;if (match.length === 1) return `$${Number(match[0]).toLocaleString()}`;return `$${Number(match[0]).toLocaleString()} - $${Number(match[1]).toLocaleString()}`;})(): "N/A"}</td>
+                          {/* <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{app.overview ? app.overview.slice(0, 40) + (app.overview.length > 40 ? '...' : '') : "-"}</td> */}
+                          {/* <td className="py-3 px-5 text-gray-700 dark:text-gray-300">{typeof app.expectations === "string"? app.expectations.slice(0, 40) + (app.expectations.length > 40 ? "..." : ""): app.expectations && typeof app.expectations === "object"? (() => {const str = Object.entries(app.expectations).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`).join(" | ");return str.slice(0, 40) + (str.length > 40 ? "..." : "");})(): "-"}</td> */}
                           <td className="py-3 px-5">
                             <button
                               className="text-blue-600 dark:text-blue-400 font-semibold hover:underline focus:outline-none focus:ring-2 focus:ring-blue-400 rounded transition"
@@ -153,7 +153,7 @@ export default function JobApplicationHistoryPage() {
                 {selectedApp.location && <div className="mb-2 text-base text-gray-700 dark:text-gray-300"><span className="font-semibold">Location:</span> {selectedApp.location}</div>}
                 {selectedApp.pay && <div className="mb-2 text-base text-gray-700 dark:text-gray-300"><span className="font-semibold">Pay:</span> {selectedApp.pay}</div>}
                 {selectedApp.overview && <div className="mb-2 text-base text-gray-700 dark:text-gray-300"><span className="font-semibold">Overview:</span> {selectedApp.overview}</div>}
-                {selectedApp.expectations && <div className="mb-2 text-base text-gray-700 dark:text-gray-300"><span className="font-semibold">Expectations:</span> {selectedApp.expectations}</div>}
+                {selectedApp.expectations && typeof selectedApp.expectations === "object" ? (<div className="mb-2 text-base text-gray-700 dark:text-gray-300"><span className="font-semibold">Expectations:</span><ul className="list-disc ml-6">{Object.entries(selectedApp.expectations).map(([key, value]) => (<li key={key}><b>{key}:</b> {typeof value === "string" ? value : JSON.stringify(value)}</li>))}</ul></div>) : selectedApp.expectations ? (<div className="mb-2 text-base text-gray-700 dark:text-gray-300"><span className="font-semibold">Expectations:</span> {selectedApp.expectations}</div>) : null}
                 {/* {selectedApp.jobText && (
                   <div className="mt-2">
                     <span className="font-semibold">Full Job Description:</span>
