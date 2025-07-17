@@ -1,0 +1,240 @@
+Here are improved LaTeX templates for your database:
+
+=== TEMPLATE 1: MODERN MINIMAL ===
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+
+% Custom section formatting - UNNUMBERED for resume sections
+\titleformat{\section}{\large\bfseries\color{blue!70!black}}{}{0pt}{}[\titlerule]
+\titlespacing*{\section}{0pt}{12pt}{6pt}
+
+% Remove page numbers
+\pagestyle{empty}
+
+% Resume spacing
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+
+% Better line spacing
+\linespread{1.1}
+
+\begin{document}
+
+{{RESUME_CONTENT}}
+
+\end{document}
+
+=== TEMPLATE 2: PROFESSIONAL CLASSIC ===
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+
+% Professional section formatting - UNNUMBERED for resume sections
+\titleformat{\section}{\Large\bfseries}{}{0pt}{}[\hrule height 0.5pt]
+\titlespacing*{\section}{0pt}{16pt}{8pt}
+
+% Unnumbered subsections for resume
+\titleformat{\subsection}{\normalsize\bfseries\color{blue!70!black}}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{8pt}{4pt}
+
+% Remove page numbers
+\pagestyle{empty}
+
+% Professional spacing with line breaks
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\linespread{1.15}
+
+\begin{document}
+
+{{RESUME_CONTENT}}
+
+\end{document}
+
+=== TEMPLATE 3: COMPACT PRO ===
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=0.5in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+
+% Compact section formatting - UNNUMBERED for resume sections
+\titleformat{\section}{\normalsize\bfseries\color{gray!80!black}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+
+% Unnumbered subsections for resume
+\titleformat{\subsection}{\normalsize\bfseries\color{gray!80!black}}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+
+% Remove page numbers
+\pagestyle{empty}
+
+% Compact but readable spacing
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{3pt}
+\setlist{nosep, leftmargin=10pt}
+\linespread{1.05}
+
+\begin{document}
+
+{{RESUME_CONTENT}}
+
+\end{document}
+
+=== TEMPLATE 4: ACADEMIC FORMAL ===
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+
+% Academic section formatting - UNNUMBERED for resume sections
+\titleformat{\section}{\large\bfseries\scshape}{}{0pt}{}
+\titlespacing*{\section}{0pt}{18pt}{10pt}
+
+% Academic subsection formatting - UNNUMBERED for resume subsections
+\titleformat{\subsection}{\normalsize\bfseries}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{8pt}{4pt}
+
+% Remove page numbers for resume
+\pagestyle{empty}
+
+% Academic spacing with proper line breaks
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\linespread{1.2}
+
+\begin{document}
+
+{{RESUME_CONTENT}}
+
+\end{document}
+
+=== TEMPLATE 5: CREATIVE MODERN ===
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{graphicx}
+
+% Creative section formatting with colors
+\definecolor{primarycolor}{RGB}{41, 128, 185}
+\definecolor{accentcolor}{RGB}{52, 73, 94}
+
+\titleformat{\section}{\Large\bfseries\color{primarycolor}}{}{0pt}{}[\color{primarycolor}\hrule height 1pt]
+\titlespacing*{\section}{0pt}{14pt}{8pt}
+
+% Creative subsection formatting - UNNUMBERED for resume subsections
+\titleformat{\subsection}{\normalsize\bfseries\color{accentcolor}}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+
+% Remove page numbers
+\pagestyle{empty}
+
+% Modern spacing with proper line breaks
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\linespread{1.1}
+
+\begin{document}
+
+{{RESUME_CONTENT}}
+
+\end{document}
+
+=== TEMPLATE 6: CREATIVE ANTI-CV STYLE ===
+\documentclass[paper=a4,fontsize=11pt]{scrartcl} % KOMA-article class
+							
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+\usepackage[protrusion=true,expansion=true]{microtype}
+\usepackage{amsmath,amsfonts,amsthm}     % Math packages
+\usepackage{graphicx}                    % Enable pdflatex
+\usepackage[svgnames]{xcolor}            % Colors by their 'svgnames'
+\usepackage[margin=0.5in]{geometry}
+	\textheight=700px                    % Saving trees ;-)
+\usepackage{url}
+
+\usepackage{tikz}
+% Fallback font package - more widely available than kpfonts
+\usepackage{amsfonts} % for \heartsuit, more compatible than kpfonts
+\usepackage{color}
+\newcommand*\Hs{\ensuremath{\color{red}\heartsuit}}
+
+%%% Heart-stab command (simplified for better compatibility)
+\newcommand{\heartstab}{%
+\begin{tikzpicture}[baseline=-0.5ex]%
+\node at (0,0) {\Large\color{red}$\heartsuit$};
+\draw [line width=0.30mm, black] (-0.3ex,-0.1ex) -- (0.5ex,0.3ex);%
+\draw [line width=0.30mm, black] (0.3ex,-0.1ex) -- (-0.1ex,0.5ex);%
+\end{tikzpicture}%
+}
+
+%%% Squiggly arrow
+\newcommand{\squigarr}{
+{\Large \color{blue}$\rightsquigarrow$}
+}
+
+\usepackage[colorlinks=true,urlcolor=purple]{hyperref}
+
+\frenchspacing              % Better looking spacings after periods
+\pagestyle{empty}           % No pagenumbers/headers/footers
+
+%%% Custom sectioning - simplified approach for better compatibility
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\scshape}{}{0pt}{}
+\titlespacing*{\section}{0pt}{12pt}{6pt}
+
+%%% Macros
+%%% ------------------------------------------------------------
+\newlength{\spacebox}
+\settowidth{\spacebox}{8888888888}			% Box to align text
+\newcommand{\sepspace}{\vspace*{0.5em}}		% Vertical space macro
+
+\newcommand{\MyName}[1]{ % Name
+		\Huge \bfseries \hfill #1
+		\par \normalsize \normalfont}
+		
+\newcommand{\MySlogan}[1]{ % Slogan (optional)
+		\large \hfill \textit{#1}
+		\par \normalsize \normalfont}
+		
+\newcommand{\NameEmailPhoneSiteGithub}[5]{
+		\Huge \textbf{#1} 
+		\large \hfill #2\hspace{25pt}#3
+		
+		\textit{Resume}\hfill \textit{website } #4 \hspace{25pt}\textit{github } #5 
+		\par \normalsize \normalfont
+}
+
+\newcommand{\NewPart}[1]{\section*{\uppercase{#1}}}
+
+\newcommand{\SkillsEntry}[2]{      % Same as \PersonalEntry
+		\noindent\hangindent=2em\hangafter=0 % Indentation
+		\parbox{\spacebox}{        % Box to align text
+		\textit{#1}}			   % Entry name (birth, address, etc.)
+		\hspace{1.5em} #2 \par}    % Entry value	
+
+% Resume spacing with proper line breaks
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\linespread{1.1}
+
+%%% Begin Document
+%%% ------------------------------------------------------------
+\begin{document}
+
+{{RESUME_CONTENT}}
+
+\end{document}

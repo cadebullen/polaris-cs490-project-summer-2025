@@ -39,8 +39,8 @@ export async function getTemplateContent(templateId: string) {
       console.log('Fixed content preview:', fixedContent.substring(0, 100));
       data.content = fixedContent;
     }
+  // End of plain text resume logic
   }
-  
   return data;
 }
 
@@ -64,122 +64,296 @@ function sanitizeForLatex(text: string): string {
     .replace(/[^\x20-\x7E\n\r\t]/g, '') // Remove non-ASCII characters
     .replace(/\r\n/g, '\n') // Normalize line endings
     .replace(/\r/g, '\n')
-    // Clean up extra whitespace
-    .replace(/\s+/g, ' ')
+    // Clean up extra spaces/tabs but preserve newlines
+    .replace(/[ \t]+/g, ' ')
     .trim();
 }
 
 // Merge resume data into LaTeX template (simple string replace, customize as needed)
-function mergeResumeWithTemplate(resume: any, template: any): string {
+export function mergeResumeWithTemplate(resume: any, template: any): string {
   console.log('Merging resume with template...');
-  console.log('Template content preview:', template?.content?.substring(0, 200));
-  console.log('Resume data keys:', Object.keys(resume || {}));
+  console.log('Template type:', typeof template);
+  console.log('Template keys:', Object.keys(template || {}));
   
   let latex = template?.content || template || '';
-  
   if (!latex) {
     throw new Error('Template content is empty or missing');
   }
+
+  console.log('Template content preview:', latex.substring(0, 200));
+
+  // Remove any extra \begin{document} and \end{document} after the first \begin{document}
+  const firstDocIdx = latex.indexOf('\\begin{document}');
+  if (firstDocIdx !== -1) {
+    // Find the end of the first \begin{document}
+    const beforeDoc = latex.slice(0, firstDocIdx + 16); // length of "\\begin{document}"
+    let afterDoc = latex.slice(firstDocIdx + 16);
+    // Remove all subsequent \begin{document} and \end{document} in afterDoc
+    afterDoc = afterDoc.replace(/\\begin\{document\}/g, '');
+    afterDoc = afterDoc.replace(/\\end\{document\}/g, '');
+    latex = beforeDoc + afterDoc;
+  }
+
+  // Validate template has required placeholder
+  if (!latex.includes('{{RESUME_CONTENT}}')) {
+    console.warn('Template missing {{RESUME_CONTENT}} placeholder');
+    throw new Error('Template is missing required {{RESUME_CONTENT}} placeholder');
+  }
+  
+  // Check for common LaTeX syntax errors and auto-fix them
+  const syntaxErrors = [];
+  
+  // Fix missing backslashes in ALL LaTeX commands - comprehensive
+  latex = latex.replace(/([^\\]|^)ewcommand/g, '$1\\newcommand');
+  latex = latex.replace(/([^\\]|^)ewlength/g, '$1\\newlength');
+  latex = latex.replace(/([^\\]|^)ormalsize/g, '$1\\normalsize');
+  latex = latex.replace(/([^\\]|^)oindent/g, '$1\\noindent');
+  latex = latex.replace(/([^\\]|^)itleformat/g, '$1\\titleformat');
+  latex = latex.replace(/([^\\]|^)itlespacing/g, '$1\\titlespacing');
+  
+  // More aggressive Creative template fixes based on console errors
+  latex = latex.replace(/([^\\]|^)ewcommand\*/g, '$1\\newcommand*');
+  latex = latex.replace(/\\newcommand\*\\Hs\\{/g, '\\newcommand*{\\Hs}{');
+  latex = latex.replace(/\\Hs\\{\\ensuremath/g, '\\newcommand*{\\Hs}{\\ensuremath');
+  
+  // Fix broken command definitions from console logs
+  latex = latex.replace(/ewcommand\\{\\heartstab\\}\\{/g, '\\newcommand{\\heartstab}{');
+  latex = latex.replace(/ewcommand\\{\\squigarr\\}\\{/g, '\\newcommand{\\squigarr}{');
+  latex = latex.replace(/ewlength\\{\\spacebox\\}/g, '\\newlength{\\spacebox}');
+  latex = latex.replace(/ewcommand\\{\\sepspace\\}\\{/g, '\\newcommand{\\sepspace}{');
+  latex = latex.replace(/ewcommand\\{\\MyName\\}\\[1\\]\\{/g, '\\newcommand{\\MyName}[1]{');
+  latex = latex.replace(/ewcommand\\{\\MySlogan\\}\\[1\\]\\{/g, '\\newcommand{\\MySlogan}[1]{');
+  latex = latex.replace(/ewcommand\\{\\NameEmailPhoneSiteGithub\\}\\[5\\]\\{/g, '\\newcommand{\\NameEmailPhoneSiteGithub}[5]{');
+  latex = latex.replace(/ewcommand\\{\\NewPart\\}\\[1\\]\\{/g, '\\newcommand{\\NewPart}[1]{');
+  latex = latex.replace(/ewcommand\\{\\SkillsEntry\\}\\[2\\]\\{/g, '\\newcommand{\\SkillsEntry}[2]{');
+  
+  // Fix parameter number issues in macro definitions
+  latex = latex.replace(/\\newcommand\{([^}]+)\}\{([^#]*#1[^}]*)\}/g, '\\newcommand{$1}[1]{$2}');
+  latex = latex.replace(/\\newcommand\{([^}]+)\}\{([^#]*#1[^#]*#2[^}]*)\}/g, '\\newcommand{$1}[2]{$2}');
+  latex = latex.replace(/\\newcommand\{([^}]+)\}\{([^#]*#1[^#]*#2[^#]*#3[^#]*#4[^#]*#5[^}]*)\}/g, '\\newcommand{$1}[5]{$2}');
+  
+  // Fix broken titleformat commands with line breaks and missing braces
+  latex = latex.replace(/\\titleformat\{\\section\}\{\s*\\large\s*\\bfseries\s*\\scshape\s*\}\s*\{/g, '\\titleformat{\\section}{\\large\\bfseries\\scshape}{');
+  latex = latex.replace(/\\titleformat\{\\subsection\}\s*\{\s*\n?\s*ormalsize/g, '\\titleformat{\\subsection}{\\small\\bfseries');
+  latex = latex.replace(/\\titleformat\{\\subsection\}\s*\{\s*\\normalsize\s*\\bfseries\s*\}\s*\{/g, '\\titleformat{\\subsection}{\\small\\bfseries}{');
+  latex = latex.replace(/\\titleformat\{\\subsection\}\s*\{\s*\\small\s*\\bfseries\s*\}\s*\{/g, '\\titleformat{\\subsection}{\\small\\bfseries}{');
+  
+  // Fix incomplete titleformat commands
+  latex = latex.replace(/\\titleformat\{\\subsection\}\{([^}]+)\}$/gm, '\\titleformat{\\subsection}{$1}{}{0pt}{}');
+  latex = latex.replace(/\\titleformat\{\\section\}\{([^}]+)\}$/gm, '\\titleformat{\\section}{$1}{}{0pt}{}');
+  
+  // Fix spacing issues in titlespacing
+  latex = latex.replace(/\\titlespacing\*\{\\section\}\{0pt\}\{18pt\}\{10pt\}/g, '\\titlespacing*{\\section}{0pt}{18pt}{10pt}');
+  latex = latex.replace(/\\titlespacing\*\{\\subsection\}\{0pt\}\{8pt\}\{4pt\}/g, '\\titlespacing*{\\subsection}{0pt}{8pt}{4pt}');
+  
+  // Remove any stray \t characters and fix common character issues
+  latex = latex.replace(/\\t([^a-zA-Z])/g, '$1');
+  latex = latex.replace(/\r\n/g, '\n');
+  latex = latex.replace(/\r/g, '\n');
+  
+  // Fix common package issues
+  latex = latex.replace(/\\usepackage\{utf8\}\{inputenc\}/g, '\\usepackage[utf8]{inputenc}');
+  latex = latex.replace(/\\usepackage\{margin=([^}]+)\}\{geometry\}/g, '\\usepackage[margin=$1]{geometry}');
+  
+  // Fix missing closing braces for titleformat
+  if (latex.includes('\\titleformat{\\section}') && !latex.match(/\\titleformat\{\\section\}[^}]*\}[^}]*\}[^}]*\}[^}]*\}/)) {
+    latex = latex.replace(/\\titleformat\{\\section\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}([^}]*)/g, 
+                         '\\titleformat{\\section}{$1}{$2}{$3}{$4}');
+  }
+  
+  console.log('Applied comprehensive template fixes');
+  console.log('Fixed template preview:', latex.substring(0, 400));
+  
+  // Validate the template structure
+  const validationErrors = [];
+  if (!latex.includes('\\documentclass')) {
+    validationErrors.push('Missing \\documentclass');
+  }
+  if (!latex.includes('\\begin{document}')) {
+    validationErrors.push('Missing \\begin{document}');
+  }
+  if (!latex.includes('\\end{document}')) {
+    validationErrors.push('Missing \\end{document}');
+  }
+  
+  // Check for unmatched braces in titleformat commands
+  const titleformatMatches = latex.match(/\\titleformat\{[^}]*\}/g);
+  if (titleformatMatches) {
+    titleformatMatches.forEach((match: string) => {
+      const openBraces = (match.match(/\{/g) || []).length;
+      const closeBraces = (match.match(/\}/g) || []).length;
+      if (openBraces !== closeBraces) {
+        validationErrors.push(`Unmatched braces in: ${match}`);
+      }
+    });
+  }
+  
+  if (validationErrors.length > 0) {
+    console.warn('Template validation warnings:', validationErrors);
+  } else {
+    console.log('✅ Template validation passed');
+  }
+  
+  console.log('Template validation passed');
   
   // Convert literal \n strings to actual newlines
   latex = latex.replace(/\\n/g, '\n');
-  
   if (!resume) {
     throw new Error('Resume data is missing');
   }
-
   // Handle case where resume is a plain text string (unformatted resume)
   if (typeof resume === 'string') {
-    console.log('Resume is unformatted text, creating simple LaTeX document...');
-    
-    // Create a simple LaTeX document with the unformatted text
+    console.log('Resume is unformatted text, creating enhanced LaTeX document...');
     const sanitizedText = sanitizeForLatex(resume);
     
-    // Replace the {{RESUME_CONTENT}} placeholder with formatted text
-    if (latex.includes('{{RESUME_CONTENT}}')) {
-      // Create formatted content from the unformatted text
-      const latexLines = sanitizedText.split('\n').map(line => line.trim()).filter(line => line);
-      const beginCenter = '\\begin{center}';
-      const largeTitle = '{\\Large \\textbf{Resume}}';
-      const endCenter = '\\end{center}';
-      const vspace = '\\vspace{5mm}';
-      const lineBreak = ' \\\\';
-      
-      const formattedContent = [
-        '',
-        beginCenter,
-        largeTitle,
-        endCenter,
-        '',
-        vspace,
-        '',
-        latexLines.join(lineBreak + '\n'),
-        ''
-      ].join('\n');
-      
-      latex = latex.replace('{{RESUME_CONTENT}}', formattedContent);
-    } else {
-      // Fallback: find the document body and replace it with our text
-      if (latex.includes('\\begin{document}') && latex.includes('\\end{document}')) {
-        const beforeDoc = latex.substring(0, latex.indexOf('\\begin{document}') + '\\begin{document}'.length);
-        const afterDoc = latex.substring(latex.indexOf('\\end{document}'));
-        
-        // Create formatted content from the unformatted text
-        const latexLines = sanitizedText.split('\n').map(line => line.trim()).filter(line => line);
-        const beginCenter = '\\begin{center}';
-        const largeTitle = '{\\Large \\textbf{Resume}}';
-        const endCenter = '\\end{center}';
-        const vspace = '\\vspace{5mm}';
-        const lineBreak = ' \\\\';
-        
-        const formattedContent = [
-          '',
-          beginCenter,
-          largeTitle,
-          endCenter,
-          '',
-          vspace,
-          '',
-          latexLines.join(lineBreak + '\n'),
-          ''
-        ].join('\n');
-        
-        latex = beforeDoc + formattedContent + afterDoc;
-      } else {
-        // Fallback: create a complete simple document
-        const latexLines = sanitizedText.split('\n').map(line => line.trim()).filter(line => line);
-        const docClass = '\\documentclass[11pt]{article}';
-        const geometry = '\\usepackage[margin=1in]{geometry}';
-        const inputenc = '\\usepackage[utf8]{inputenc}';
-        const beginDoc = '\\begin{document}';
-        const beginCenter = '\\begin{center}';
-        const largeTitle = '{\\Large \\textbf{Resume}}';
-        const endCenter = '\\end{center}';
-        const vspace = '\\vspace{5mm}';
-        const lineBreak = ' \\\\';
-        const endDoc = '\\end{document}';
-        
-        latex = [
-          docClass,
-          geometry,
-          inputenc,
-          '',
-          beginDoc,
-          '',
-          beginCenter,
-          largeTitle,
-          endCenter,
-          '',
-          vspace,
-          '',
-          latexLines.join(lineBreak + '\n'),
-          '',
-          endDoc
-        ].join('\n');
+    // Parse the resume content and format it properly
+    const lines = sanitizedText.split('\n').map(line => line.trimEnd());
+    let formattedContent = '';
+    let inItemize = false;
+    let currentSection = '';
+    
+    // Extract name and contact info from first few lines
+    let name = '';
+    let contactInfo = '';
+    let contentStartIndex = 0;
+    
+    // Find name (usually first non-empty line)
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      const line = lines[i].trim();
+      if (line && !line.includes('@') && !line.includes('(') && !line.match(/^\d+/)) {
+        name = line;
+        contentStartIndex = i + 1;
+        break;
       }
     }
     
+    // Find contact info (email, phone)
+    for (let i = contentStartIndex; i < Math.min(8, lines.length); i++) {
+      const line = lines[i].trim();
+      if (line && (line.includes('@') || line.includes('(') || line.match(/^\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/))) {
+        contactInfo += (contactInfo ? ' | ' : '') + line;
+        contentStartIndex = i + 1;
+      } else if (line && contactInfo) {
+        break; // Stop after contact info section
+      }
+    }
+    
+    // Add header with name and contact
+    if (name) {
+      formattedContent += `\\begin{center}\n{\\LARGE \\textbf{${name}}}`;
+      if (contactInfo) {
+        formattedContent += `\\\\[4pt]\n{\\large ${contactInfo}}`;
+      }
+      formattedContent += '\n\\end{center}\n\\vspace{8pt}\n';
+    }
+    
+    // Process remaining content
+    const contentLines = lines.slice(contentStartIndex);
+    
+    for (let i = 0; i < contentLines.length; i++) {
+      const line = contentLines[i].trim();
+      if (!line) continue;
+      
+      // Section headers (all caps, common section names)
+      const isSection = line === line.toUpperCase() && line.length > 2 &&
+        /^[A-Z\s&-]+$/.test(line) &&
+        (line.includes('SUMMARY') || line.includes('SKILLS') || line.includes('EDUCATION') ||
+         line.includes('EXPERIENCE') || line.includes('OBJECTIVE') || line.includes('CONTACT') ||
+         line.includes('PROGRAMMING') || line.includes('LANGUAGES') || line.includes('TECHNOLOGIES') ||
+         line.includes('COMPETENCIES') || line.includes('CERTIFICATIONS') || line.includes('PROJECTS'));
+      
+      if (isSection) {
+        if (inItemize) { 
+          formattedContent += '\\end{itemize}\n'; 
+          inItemize = false; 
+        }
+        formattedContent += `\\section*{${line}}\n`;
+        currentSection = line;
+        continue;
+      }
+      
+      // Skills section - treat as bullet points
+      if (currentSection.includes('SKILLS') || currentSection.includes('TECHNOLOGIES')) {
+        // Check if this is a skills subsection
+        if (/^[A-Z\s&-]+:/.test(line) && line.length < 60) {
+          if (inItemize) { 
+            formattedContent += '\\end{itemize}\n'; 
+            inItemize = false; 
+          }
+          formattedContent += `\\vspace{4pt}\\noindent\\textbf{${line}}\\\\[2pt]\n`;
+          continue;
+        }
+        // Regular skill items
+        if (!inItemize) { 
+          formattedContent += '\\begin{itemize}\n'; 
+          inItemize = true; 
+        }
+        formattedContent += `\\item ${line}\n`;
+        continue;
+      }
+      
+      // Experience/Projects section
+      if (currentSection.includes('EXPERIENCE') || currentSection.includes('PROJECTS')) {
+        // Company/Organization names (all caps or title case with organization indicators)
+        if (/^[A-Z][A-Z\s&-]*[A-Z]$/.test(line) && line.length < 60) {
+          if (inItemize) { 
+            formattedContent += '\\end{itemize}\n'; 
+            inItemize = false; 
+          }
+          formattedContent += `\\vspace{6pt}\\noindent\\textbf{\\large ${line}}\\\\[2pt]\n`;
+          continue;
+        }
+        
+        // Job titles and dates
+        if (line.includes(',') && (/\d{4}/.test(line) || line.includes('Current') || line.includes('Present'))) {
+          formattedContent += `\\textit{${line}}\\\\[2pt]\n`;
+          continue;
+        }
+        
+        // Bullet points for responsibilities
+        if (!inItemize) { 
+          formattedContent += '\\begin{itemize}\n'; 
+          inItemize = true; 
+        }
+        formattedContent += `\\item ${line}\n`;
+        continue;
+      }
+      
+      // Education section
+      if (currentSection.includes('EDUCATION')) {
+        // School names
+        if (/^[A-Z][A-Z\s&-]*[A-Z]$/.test(line) && line.length < 60) {
+          if (inItemize) { 
+            formattedContent += '\\end{itemize}\n'; 
+            inItemize = false; 
+          }
+          formattedContent += `\\vspace{6pt}\\noindent\\textbf{\\large ${line}}\\\\[2pt]\n`;
+          continue;
+        }
+        
+        // Degree and dates
+        formattedContent += `${line}\\\\[2pt]\n`;
+        continue;
+      }
+      
+      // Default: regular paragraph text
+      if (inItemize) { 
+        formattedContent += '\\end{itemize}\n'; 
+        inItemize = false; 
+      }
+      formattedContent += `${line}\\\\[4pt]\n`;
+    }
+    
+    // Close any open itemize
+    if (inItemize) {
+      formattedContent += '\\end{itemize}\n';
+    }
+    
+    // Replace the content placeholder
+    latex = latex.replace('{{RESUME_CONTENT}}', formattedContent);
+    
     console.log('Merged LaTeX content preview:', latex.substring(0, 500));
+    console.log('Full LaTeX content length:', latex.length);
     return latex;
   }
   
@@ -244,174 +418,58 @@ function mergeResumeWithTemplate(resume: any, template: any): string {
 // Compile LaTeX in the cloud using LaTeX Online service
 async function compileLatexInCloud(latexContent: string): Promise<Buffer> {
   console.log('Compiling LaTeX in cloud...');
-  
-  try {
-    // Create query parameter for the service
-    const encodedLatex = encodeURIComponent(latexContent);
-    const url = `${LATEX_ONLINE_URL}?text=${encodedLatex}`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/pdf',
-      }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Cloud LaTeX compilation failed: ${response.status} - ${errorText}`);
-    }
-
-    const pdfBuffer = Buffer.from(await response.arrayBuffer());
-    console.log('Cloud compilation successful, PDF size:', pdfBuffer.length);
-    return pdfBuffer;
-    
-  } catch (error) {
-    console.error('Cloud LaTeX compilation error:', error);
-    throw new Error(`Cloud compilation failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-// Compile LaTeX to PDF using pdflatex
-async function compileLatexToPdf(latexContent: string): Promise<Buffer> {
-  // Validate LaTeX content
-  if (!latexContent || typeof latexContent !== 'string') {
-    throw new Error('Invalid LaTeX content provided');
-  }
-  
-  // Basic LaTeX structure validation
-  if (!latexContent.includes('\\documentclass') && !latexContent.includes('\\begin{document}')) {
-    console.warn('LaTeX content may be missing document structure');
-  }
-  
-  // Use OS-appropriate temp directory
-  const tmpDir = path.join(os.tmpdir(), `resume_${Date.now()}_${Math.random().toString(36).slice(2)}`);
-  
-  console.log('Creating temporary directory:', tmpDir);
-  await fs.mkdir(tmpDir, { recursive: true });
-  
-  const texPath = path.join(tmpDir, 'resume.tex');
-  const pdfPath = path.join(tmpDir, 'resume.pdf');
-  
-  console.log('Writing LaTeX content to:', texPath);
   console.log('LaTeX content length:', latexContent.length);
-  
-  // Write LaTeX content with UTF-8 encoding
-  await fs.writeFile(texPath, latexContent, { encoding: 'utf8' });
-  return new Promise((resolve, reject) => {
-    console.log('Starting pdflatex compilation...');
-    // Add additional flags for better error handling and UTF-8 support
-    const pdflatexArgs = [
-      '-interaction=nonstopmode',
-      '-halt-on-error',
-      '-file-line-error',
-      '-output-directory', tmpDir,
-      texPath
-    ];
-    
-    console.log('Running command: pdflatex', pdflatexArgs.join(' '));
-    const proc = spawn('pdflatex', pdflatexArgs, {
-      cwd: tmpDir, // Set working directory
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, TEXMFOUTPUT: tmpDir } // Set LaTeX output directory
-    });
-    
-    let stdout = '';
-    let stderr = '';
-    
-    proc.stdout?.on('data', (data) => {
-      const output = data.toString();
-      stdout += output;
-      console.log('pdflatex stdout:', output);
-    });
-    
-    proc.stderr?.on('data', (data) => {
-      const output = data.toString();
-      stderr += output;
-      console.error('pdflatex stderr:', output);
-    });
-    
-    proc.on('error', (error) => {
-      console.error('pdflatex spawn error:', error);
-      reject(new Error(`pdflatex spawn failed: ${error.message}`));
-    });
-    
-    proc.on('close', async (code) => {
-      if (code === 0) {
-        try {
-          const pdfBuffer = await fs.readFile(pdfPath);
-          // Clean up
-          await fs.rm(tmpDir, { recursive: true, force: true });
-          resolve(pdfBuffer);
-        } catch (err) {
-          console.error('Failed to read generated PDF:', err);
-          reject(err);
-        }
-      } else {
-        console.error('pdflatex failed with exit code:', code);
-        console.error('pdflatex stdout:', stdout);
-        console.error('pdflatex stderr:', stderr);
-        
-        // Try to read the log file for more details
-        try {
-          const logPath = path.join(tmpDir, 'resume.log');
-          const logContent = await fs.readFile(logPath, 'utf8');
-          console.error('pdflatex log file:', logContent);
-        } catch (logErr) {
-          console.error('Could not read pdflatex log file:', logErr);
-        }
-        
-        // Clean up even on failure
-        try {
-          await fs.rm(tmpDir, { recursive: true, force: true });
-        } catch (cleanupErr) {
-          console.error('Failed to cleanup tmp directory:', cleanupErr);
-        }
-        
-        reject(new Error(`pdflatex failed with exit code ${code}. Check server logs for details.`));
-      }
-    });
+  console.log('LaTeX preview (first 200 chars):', latexContent.substring(0, 200));
+
+  // latexonline.cc GET API: https://latexonline.cc/compile?text=...&format=pdf
+  // Limit: URL length must be < 2000 chars (safe for most browsers/servers)
+  const baseUrl = 'https://latexonline.cc/compile?format=pdf&text=';
+  const encoded = encodeURIComponent(latexContent);
+  const fullUrl = baseUrl + encoded;
+  if (fullUrl.length > 2000) {
+    throw new Error('LaTeX document is too large for cloud compilation via GET. Please use a shorter template or reduce resume content.');
+  }
+  console.log('Requesting:', fullUrl.substring(0, 200) + (fullUrl.length > 200 ? '... (truncated)' : ''));
+  const response = await fetch(fullUrl, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/pdf',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
   });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('LaTeX compilation failed with status:', response.status);
+    console.error('Error response body:', errorText);
+    throw new Error(`Cloud LaTeX compilation failed: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+  const contentType = response.headers.get('content-type');
+  if (!contentType || !contentType.includes('pdf')) {
+    const responseText = await response.text();
+    console.error('Non-PDF response body:', responseText.substring(0, 500));
+    throw new Error(`Expected PDF but got ${contentType}: ${responseText.substring(0, 200)}`);
+  }
+  const pdfBuffer = Buffer.from(await response.arrayBuffer());
+  console.log('Cloud compilation successful, PDF size:', pdfBuffer.length);
+  return pdfBuffer;
 }
 
-// Main function: merge, compile, return PDF buffer
-export async function generatePdfBuffer(resume: any, template: any): Promise<Buffer> {
+// Exported function to generate PDF buffer from resume and template
+export async function generatePdfBuffer(resume: any, template: any): Promise<{buffer: Buffer, isLatex: boolean}> {
   const latexContent = mergeResumeWithTemplate(resume, template);
+  console.log('USE_CLOUD_LATEX:', USE_CLOUD_LATEX);
+  console.log('NODE_ENV:', process.env.NODE_ENV);
+  console.log('USE_CLOUD_LATEX env var:', process.env.USE_CLOUD_LATEX);
   
-  // Try cloud compilation first (works for all users)
   if (USE_CLOUD_LATEX) {
-    try {
-      console.log('Attempting cloud-based LaTeX compilation...');
-      return await compileLatexInCloud(latexContent);
-    } catch (cloudError) {
-      console.warn('Cloud compilation failed, trying local fallback:', cloudError instanceof Error ? cloudError.message : String(cloudError));
-      
-      // Only try local if we're in development or if local LaTeX is explicitly available
-      if (process.env.NODE_ENV === 'development' || process.env.LOCAL_LATEX_AVAILABLE === 'true') {
-        try {
-          console.log('Attempting local LaTeX compilation as fallback...');
-          return await compileLatexToPdf(latexContent);
-        } catch (localError) {
-          console.error('Both cloud and local compilation failed');
-          throw new Error(`PDF generation failed. Cloud: ${cloudError instanceof Error ? cloudError.message : String(cloudError)}, Local: ${localError instanceof Error ? localError.message : String(localError)}`);
-        }
-      } else {
-        // In production or when local LaTeX is not available, just throw the cloud error
-        throw cloudError;
-      }
-    }
+    console.log('🔄 Attempting LaTeX compilation with ORIGINAL template...');
+    const pdfBuffer = await compileLatexInCloud(latexContent);
+    console.log('✅ SUCCESS: ORIGINAL TEMPLATE WORKS! Unique design preserved. PDF size:', pdfBuffer.length);
+    return { buffer: pdfBuffer, isLatex: false };
   } else {
-    // If cloud is disabled, try local first
-    try {
-      console.log('Cloud compilation disabled, using local LaTeX...');
-      return await compileLatexToPdf(latexContent);
-    } catch (localError) {
-      console.warn('Local compilation failed, trying cloud as fallback:', localError instanceof Error ? localError.message : String(localError));
-      try {
-        return await compileLatexInCloud(latexContent);
-      } catch (cloudError) {
-        throw new Error(`PDF generation failed. Local: ${localError instanceof Error ? localError.message : String(localError)}, Cloud: ${cloudError instanceof Error ? cloudError.message : String(cloudError)}`);
-      }
-    }
+    console.log('Using local mode, returning LaTeX content');
+    return { buffer: Buffer.from(latexContent), isLatex: true };
   }
 }
+
+

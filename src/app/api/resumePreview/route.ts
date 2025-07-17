@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTemplateContent, generatePdfBuffer } from '../../../lib/resumeUtils';
+import { getTemplateContent } from '../../../lib/resumeUtils';
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 
 // Helper: Convert PDF buffer to PNG using pdftoppm (Poppler) or fallback
 async function pdfBufferToPng(pdfBuffer: Buffer): Promise<Buffer> {
@@ -69,18 +70,49 @@ export async function GET(req: NextRequest) {
 
     console.log('[resumePreview] Using resume content, length:', resumeContent.length);
 
-    // Generate PDF buffer using the actual resume content
-    const pdfBuffer = await generatePdfBuffer(resumeContent, template);
+    // Generate PDF using local compilation with proper server-side merging
+    const { mergeResumeWithTemplate } = await import('@/lib/resumeUtils');
+    const mergedLatex = mergeResumeWithTemplate(resumeContent, template.content);
     
-    // On Windows, pdftoppm isn't available, so return PDF directly
-    // Browsers can't display PDFs in <img> tags, so this will fallback to static images
-    return new NextResponse(new Uint8Array(pdfBuffer), {
-      status: 200,
-      headers: { 
-        'Content-Type': 'application/pdf',
-        'Cache-Control': 'public, max-age=300' // Cache for 5 minutes
-      },
-    });
+    // Create a unique temp directory
+    const tmpDir = path.join(os.tmpdir(), 'preview-' + crypto.randomBytes(8).toString('hex'));
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    const texPath = path.join(tmpDir, 'preview.tex');
+    const pdfPath = path.join(tmpDir, 'preview.pdf');
+
+    try {
+      // Write LaTeX to file
+      await fs.writeFile(texPath, mergedLatex, 'utf8');
+
+      // Run pdflatex
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('pdflatex', ['-interaction=nonstopmode', '-output-directory', tmpDir, texPath], { cwd: tmpDir });
+        let stderr = '';
+        proc.stderr.on('data', (data) => { stderr += data.toString(); });
+        proc.on('close', (code) => {
+          if (code === 0) resolve();
+          else reject(new Error('pdflatex failed: ' + stderr));
+        });
+      });
+
+      // Read PDF and return
+      const pdfBuffer = await fs.readFile(pdfPath);
+      
+      // Check for download param
+      const isDownload = searchParams.get('download') === '1';
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        status: 200,
+        headers: { 
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `${isDownload ? 'attachment' : 'inline'}; filename="resume.pdf"`,
+          'Cache-Control': 'public, max-age=300'
+        },
+      });
+    } finally {
+      // Clean up temp files
+      fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   } catch (err) {
     console.error('Preview generation error:', err);
     return NextResponse.json({ error: 'Failed to generate preview', details: String(err) }, { status: 500 });

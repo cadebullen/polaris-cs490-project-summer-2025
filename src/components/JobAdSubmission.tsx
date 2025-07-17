@@ -777,66 +777,50 @@ const JobAdSubmission: React.FC = () => {
                       onClick={async () => {
                         setIsFormattingResume(true);
                         setDownloadUrl(null);
-                        
-                        // Debug current state
-                        console.log('🎨 Format Resume clicked');
-                        console.log('🔍 Current selectedLatexTemplateId:', selectedLatexTemplateId);
-                        console.log('🔍 Current latexTemplateContent length:', latexTemplateContent?.length || 0);
-                        console.log('🔍 Current latexTemplateContent preview:', latexTemplateContent?.substring(0, 100) || 'NO CONTENT');
-                        console.log('🔍 Available templates count:', latexTemplates.length);
-                        if (latexTemplates.length > 0) {
-                          console.log('🔍 First template content preview:', latexTemplates[0].content?.substring(0, 100) || 'NO CONTENT');
-                        }
-                        
-                        // Always ensure a template is selected: default to first if none
+
+                        // Only allow selection from the 5 short templates (no fallback to 'ORIGINAL')
+                        const allowedTemplateNames = [
+                          'Classic',
+                          'Modern',
+                          'Minimalist',
+                          'Sidebar',
+                          'Boxed'
+                        ];
+                        const allowedTemplates = latexTemplates.filter(tpl => allowedTemplateNames.includes(tpl.name));
                         let templateId = selectedLatexTemplateId;
                         let templateContent = latexTemplateContent;
-                        if ((!templateId || !templateContent) && latexTemplates.length > 0) {
-                          console.log('🔧 Auto-selecting first template');
-                          templateId = latexTemplates[0].id || latexTemplates[0].templateId;
-                          templateContent = latexTemplates[0].content || "";
+                        if ((!templateId || !templateContent) && allowedTemplates.length > 0) {
+                          templateId = allowedTemplates[0].id || allowedTemplates[0].templateId || allowedTemplates[0].name;
+                          templateContent = allowedTemplates[0].content || "";
                           setSelectedLatexTemplateId(templateId);
                           setLatexTemplateContent(templateContent);
-                          console.log('🔧 Auto-selected template content preview:', templateContent?.substring(0, 100) || 'NO CONTENT');
                         }
-                        
+                        // If somehow a non-allowed template is selected, force to first allowed
+                        if (
+                          (!allowedTemplates.find(tpl => (tpl.id || tpl.templateId || tpl.name) === templateId)) &&
+                          allowedTemplates.length > 0
+                        ) {
+                          templateId = allowedTemplates[0].id || allowedTemplates[0].templateId || allowedTemplates[0].name;
+                          templateContent = allowedTemplates[0].content || "";
+                          setSelectedLatexTemplateId(templateId);
+                          setLatexTemplateContent(templateContent);
+                        }
+
                         // Wait for state to update before proceeding (React batching)
                         await new Promise(r => setTimeout(r, 0));
-                        
-                        console.log('📤 Sending request with template content length:', templateContent?.length || 0);
-                        console.log('📤 Sending request with template content preview:', templateContent?.substring(0, 100) || 'NO CONTENT');
-                        
+
                         try {
-                          const res = await fetch("/api/resumes/format", {
+                          const res = await fetch("/api/resumes/format-local", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              resume: viewResume || viewResumeUnformatted,
-                              resumeId: selectedResumeId,
-                              latexTemplate: templateContent,
-                              format: "latex-pdf"
+                            body: JSON.stringify({ 
+                              templateContent: templateContent,
+                              resumeContent: (viewResume || viewResumeUnformatted) || "",
+                              templateId: templateId
                             })
                           });
-                          const contentType = res.headers.get('Content-Type') || '';
-                          if (contentType.includes('application/json')) {
-                            const data = await res.json();
-                            if (data.downloadUrl) {
-                              setDownloadUrl(data.downloadUrl);
-                              setCurrentStep(4); // Move to download step
-                              return;
-                            } else {
-                              alert("No download URL returned by server.");
-                              return;
-                            }
-                          }
                           if (!res.ok) throw new Error("Failed to format resume");
                           const blob = await res.blob();
-                          let filename = "formatted_resume.pdf";
-                          const disposition = res.headers.get('Content-Disposition');
-                          if (disposition) {
-                            const match = disposition.match(/filename="?([^";]+)"?/);
-                            if (match) filename = match[1];
-                          }
                           const url = window.URL.createObjectURL(blob);
                           setDownloadUrl(url);
                           setCurrentStep(4); // Move to download step
@@ -929,6 +913,16 @@ const JobAdSubmission: React.FC = () => {
                       href={downloadUrl}
                       className="inline-flex items-center px-8 py-4 rounded-xl bg-gradient-to-r from-green-600 to-green-700 text-white font-bold text-xl shadow-lg hover:from-green-700 hover:to-green-800 transform hover:scale-105 transition-all duration-200"
                       download="resume.pdf"
+                      onClick={(e) => {
+                        // Trigger actual download when clicked
+                        const a = document.createElement('a');
+                        a.href = downloadUrl;
+                        a.download = 'resume.pdf';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        e.preventDefault(); // Prevent default link behavior
+                      }}
                     >
                       <span className="mr-3 text-2xl">📄</span>
                       Download My Resume

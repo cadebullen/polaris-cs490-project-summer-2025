@@ -1,0 +1,98 @@
+// Short LaTeX resume templates for use with latexonline.cc GET API
+// Each template has a name, description, and LaTeX content with {{RESUME_CONTENT}} placeholder
+export const latexTemplates = [
+  {
+    name: 'Classic',
+    description: 'Clean, traditional layout with bold section headers.',
+    content: `\\documentclass[11pt]{article}
+\\usepackage[margin=1in]{geometry}
+\\usepackage{enumitem}
+\\usepackage{helvet}
+\\renewcommand{\\familydefault}{\\sfdefault}
+\\begin{document}
+\\begin{center}
+    {\\LARGE \\textbf{Your Name}}\\\\
+    \\vspace{2mm}
+    Contact Info Here
+\\end{center}
+\\vspace{4mm}
+{{RESUME_CONTENT}}
+\\end{document}`
+  },
+  {
+    name: 'Modern',
+    description: 'Modern look with colored section titles.',
+    content: `\\documentclass[11pt]{article}
+\\usepackage[margin=1in]{geometry}
+\\usepackage{xcolor}
+\\definecolor{sectioncolor}{RGB}{41,128,185}
+\\usepackage{sectsty}
+\\sectionfont{\\color{sectioncolor}}
+\\begin{document}
+\\begin{center}
+    {\\LARGE \\textbf{Your Name}}\\\\
+    \\vspace{2mm}
+    Contact Info Here
+\\end{center}
+\\vspace{4mm}
+{{RESUME_CONTENT}}
+\\end{document}`
+  },
+  {
+    name: 'Minimalist',
+    description: 'Minimal, single-column, no extra formatting.',
+    content: `\\documentclass[11pt]{article}
+\\usepackage[margin=1in]{geometry}
+\\begin{document}
+\\begin{center}
+    {\\Large \\textbf{Your Name}}\\\\
+    Contact Info Here
+\\end{center}
+{{RESUME_CONTENT}}
+\\end{document}`
+  },
+  {
+    name: 'Sidebar',
+    description: 'Simple sidebar for contact info (using minipage).',
+    content: `\\documentclass[11pt]{article}
+\\usepackage[margin=1in]{geometry}
+\\begin{document}
+\\noindent
+\\begin{minipage}[t]{0.3\\textwidth}
+\\vspace{0pt}
+\\textbf{Contact}\\\\
+Your Name\\\\
+Email\\\\
+Phone
+\\end{minipage}
+\\hfill
+\\begin{minipage}[t]{0.65\\textwidth}
+\\vspace{0pt}
+{{RESUME_CONTENT}}
+\\end{minipage}
+\\end{document}`
+  },
+  {
+    name: 'Boxed',
+    description: 'Sections are boxed for emphasis.',
+    content: `\\documentclass[11pt]{article}
+\\usepackage[margin=1in]{geometry}
+\\usepackage{tcolorbox}
+\\begin{document}
+\\begin{center}
+    {\\Large \\textbf{Your Name}}\\\\
+    Contact Info Here
+\\end{center}
+\\vspace{2mm}
+\\tcbset{colback=white,colframe=black!80!white,boxrule=0.5pt,arc=2pt}
+\\begin{tcolorbox}
+{{RESUME_CONTENT}}
+\\end{tcolorbox}
+\\end{document}`
+  }
+];
+
+// Utility to get template names and descriptions
+export function getLatexTemplateSummaries() {
+  return latexTemplates.map(t => ({ name: t.name, description: t.description }));
+}

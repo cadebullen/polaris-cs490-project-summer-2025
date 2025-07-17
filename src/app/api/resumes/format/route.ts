@@ -82,16 +82,31 @@ export async function POST(request: Request) {
         console.log('[LaTeX PDF] Template content provided:', !!templateToUse);
         console.log('[LaTeX PDF] Template content length:', templateToUse?.length || 0);
         console.log('[LaTeX PDF] Template preview:', templateToUse?.substring(0, 100) || 'No template');
-        const pdfBuffer = await generatePdfBuffer(resumeData, templateToUse);
-        console.log('[LaTeX PDF] Compilation successful, buffer size:', pdfBuffer.length);
+        
+        const result = await generatePdfBuffer(resumeData, templateToUse);
+        console.log('[LaTeX PDF] Compilation result - buffer size:', result.buffer.length, 'isLatex:', result.isLatex);
 
-        return new Response(new Uint8Array(pdfBuffer), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/pdf",
-            "Content-Disposition": `attachment; filename=resume_${resumeId}.pdf`,
-          },
-        });
+        if (result.isLatex) {
+          // Return LaTeX content as plain text for debugging
+          console.log('[LaTeX PDF] Returning LaTeX content as text (compilation failed)');
+          return new Response(new Uint8Array(result.buffer), {
+            status: 200,
+            headers: {
+              "Content-Type": "text/plain",
+              "Content-Disposition": `attachment; filename=resume_${resumeId}.tex`,
+            },
+          });
+        } else {
+          // Return actual PDF
+          console.log('[LaTeX PDF] Returning compiled PDF');
+          return new Response(new Uint8Array(result.buffer), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/pdf",
+              "Content-Disposition": `attachment; filename=resume_${resumeId}.pdf`,
+            },
+          });
+        }
       } catch (error) {
         console.error('[LaTeX PDF] Compilation failed:', error);
         return NextResponse.json({ 
