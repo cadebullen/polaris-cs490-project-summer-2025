@@ -17,10 +17,49 @@ import ThemeToggle from "@/components/ThemeToggle";
 import DocumentList from "@/components/DocumentList";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 
+type Template = {
+  id: string;
+  name?: string;
+  content?: string;
+  type?: string;
+};
+
+function fillTemplate(template: string, data: Record<string, string>) {
+  let result = template;
+  for (const key in data) {
+    result = result.replaceAll(`{{${key}}}`, data[key]);
+  }
+  return result;
+}
+
+async function handleDownloadResume(latexSource: string, userId: string) {
+  const res = await fetch("/api/downloadResume", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ latexSource, userId }),
+  });
+  const data = await res.json();
+  if (data.downloadUrl) {
+    window.open(data.downloadUrl, "_blank");
+  } else {
+    alert(data.error || "Failed to generate PDF.");
+  }
+}
 
 export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/templates")
+      .then(res => res.json())
+      .then(data => {
+        setTemplates(data.templates || []);
+        setTemplatesLoading(false);
+      });
+}, []);
 
   const [submittedBio, setSubmittedBio] = useState("");
 
